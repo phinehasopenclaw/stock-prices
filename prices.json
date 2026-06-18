@@ -1,6 +1,6 @@
 {
-  "updated": "2026-06-18T12:02:35Z",
-  "updated_ct": "2026-06-18 07:02:35 CDT",
+  "updated": "2026-06-18T12:36:05Z",
+  "updated_ct": "2026-06-18 07:36:05 CDT",
   "quotes": {
     "SPCX": {"price": 191.82, "change": -9.98, "change_pct": -4.9455, "high": 213.7999, "low": 187.01, "open": 209.84, "prev_close": 201.8},
     "INTC": {"price": 121.1, "change": 4.05, "change_pct": 3.4601, "high": 125.2, "low": 118.06, "open": 121.85, "prev_close": 117.05},
@@ -14,6 +14,8 @@
     "TSLA": {"price": 396.38, "change": -8.28, "change_pct": -2.0462, "high": 405.94, "low": 393.76, "open": 401.53, "prev_close": 404.66},
     "BAC": {"price": 56.53, "change": -0.31, "change_pct": -0.5454, "high": 57.98, "low": 56.295, "open": 57.14, "prev_close": 56.84},
     "JPM": {"price": 333.46, "change": 2.32, "change_pct": 0.7006, "high": 337.77, "low": 331.5, "open": 332.18, "prev_close": 331.14},
-    "KR": {"price": 61.82, "change": -2.31, "change_pct": -3.6021, "high": 64.06, "low": 61.27, "open": 64.06, "prev_close": 64.13}
+    "KR": {"price": 61.82, "change": -2.31, "change_pct": -3.6021, "high": 64.06, "low": 61.27, "open": 64.06, "prev_close": 64.13},
+    "GLD": {"price": 388.6, "change": -9.03, "change_pct": -2.271, "high": 402.04, "low": 387.08, "open": 397.82, "prev_close": 397.63},
+    "SLV": {"price": 60.61, "change": -2.78, "change_pct": -4.3855, "high": 64.69, "low": 60.385, "open": 63.544, "prev_close": 63.39}
   }
 }
