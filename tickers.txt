@@ -7,3 +7,4 @@ SWBI
 ACN
 MU
 AMD
+TSLA
