@@ -1,0 +1,75 @@
+name: Fetch Stock Prices
+
+on:
+  schedule:
+    # Every 5 minutes, 6 AM - 5 PM ET (10:00-21:00 UTC), weekdays only
+    - cron: '*/5 10-21 * * 1-5'
+  workflow_dispatch:
+    # Allows manual trigger from GitHub UI
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch prices from Finnhub
+        env:
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+        run: |
+          # Read tickers from file
+          TICKERS=$(cat tickers.txt | tr '\n' ' ')
+          
+          # Build JSON output
+          echo '{' > prices.json
+          echo '  "updated": "'$(date -u '+%Y-%m-%dT%H:%M:%SZ')'",' >> prices.json
+          echo '  "updated_ct": "'$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z')'",' >> prices.json
+          echo '  "quotes": {' >> prices.json
+          
+          FIRST=true
+          for TICKER in $TICKERS; do
+            # Skip empty lines and comments
+            [[ -z "$TICKER" || "$TICKER" == \#* ]] && continue
+            
+            # Fetch quote from Finnhub
+            QUOTE=$(curl -s "https://finnhub.io/api/v1/quote?symbol=${TICKER}&token=${FINNHUB_KEY}")
+            
+            # Extract values
+            C=$(echo $QUOTE | jq -r '.c // 0')
+            D=$(echo $QUOTE | jq -r '.d // 0')
+            DP=$(echo $QUOTE | jq -r '.dp // 0')
+            H=$(echo $QUOTE | jq -r '.h // 0')
+            L=$(echo $QUOTE | jq -r '.l // 0')
+            O=$(echo $QUOTE | jq -r '.o // 0')
+            PC=$(echo $QUOTE | jq -r '.pc // 0')
+            
+            # Add comma separator after first entry
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              echo ',' >> prices.json
+            fi
+            
+            # Write ticker data
+            printf '    "%s": {"price": %s, "change": %s, "change_pct": %s, "high": %s, "low": %s, "open": %s, "prev_close": %s}' \
+              "$TICKER" "$C" "$D" "$DP" "$H" "$L" "$O" "$PC" >> prices.json
+            
+            # Rate limit: Finnhub free tier = 60 calls/min
+            sleep 1
+          done
+          
+          echo '' >> prices.json
+          echo '  }' >> prices.json
+          echo '}' >> prices.json
+          
+          # Display for logs
+          cat prices.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "Stock Price Bot"
+          git config user.email "bot@stockprices.local"
+          git add prices.json
+          git diff --cached --quiet || git commit -m "Price update $(TZ='America/Chicago' date '+%H:%M CT')"
+          git push
