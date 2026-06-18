@@ -8,3 +8,6 @@ ACN
 MU
 AMD
 TSLA
+BAC
+JPM
+KR
