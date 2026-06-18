@@ -1,21 +1,21 @@
 {
-  "updated": "2026-06-18T17:43:16Z",
-  "updated_ct": "2026-06-18 12:43:16 CDT",
+  "updated": "2026-06-18T19:56:48Z",
+  "updated_ct": "2026-06-18 14:56:48 CDT",
   "quotes": {
-    "SPCX": {"price": 179.44, "change": -12.38, "change_pct": -6.454, "high": 190.345, "low": 172.11, "open": 190.345, "prev_close": 191.82},
-    "INTC": {"price": 134.02, "change": 12.92, "change_pct": 10.6689, "high": 135.48, "low": 127.9, "open": 130.2825, "prev_close": 121.1},
-    "AAL": {"price": 16, "change": 0.58, "change_pct": 3.7613, "high": 16.07, "low": 15.754999999999999, "open": 15.754999999999999, "prev_close": 15.42},
-    "ADBE": {"price": 195.11, "change": -1.17, "change_pct": -0.5961, "high": 196.78, "low": 190.12, "open": 195.655, "prev_close": 196.28},
-    "OKLO": {"price": 60.22, "change": 1.4, "change_pct": 2.3801, "high": 63, "low": 58.56, "open": 59.980000000000004, "prev_close": 58.82},
-    "SWBI": {"price": 16.17, "change": 2.44, "change_pct": 17.7713, "high": 17.5625, "low": 15.63, "open": 15.760000000000002, "prev_close": 13.73},
-    "ACN": {"price": 128.53, "change": -27.48, "change_pct": -17.6143, "high": 142.60500000000002, "low": 126.5, "open": 142.60500000000002, "prev_close": 156.01},
-    "MU": {"price": 1135.57, "change": 92.38, "change_pct": 8.8555, "high": 1138, "low": 1092.7935, "open": 1096.6525000000001, "prev_close": 1043.19},
-    "AMD": {"price": 534.15, "change": 21.67, "change_pct": 4.2285, "high": 539.6199, "low": 526.315, "open": 529.2750000000001, "prev_close": 512.48},
-    "TSLA": {"price": 396.2, "change": -0.18, "change_pct": -0.0454, "high": 399, "low": 384.7, "open": 398.5325, "prev_close": 396.38},
-    "BAC": {"price": 56.36, "change": -0.17, "change_pct": -0.3007, "high": 57.33, "low": 56.15, "open": 56.92, "prev_close": 56.53},
-    "JPM": {"price": 328.87, "change": -4.59, "change_pct": -1.3765, "high": 338.09, "low": 328.6, "open": 336, "prev_close": 333.46},
-    "KR": {"price": 56.73, "change": -5.09, "change_pct": -8.2336, "high": 60.56, "low": 56.5, "open": 60.56, "prev_close": 61.82},
-    "GLD": {"price": 387.94, "change": -0.66, "change_pct": -0.1698, "high": 392.5, "low": 386.8, "open": 392.345, "prev_close": 388.6},
-    "SLV": {"price": 59.67, "change": -0.94, "change_pct": -1.5509, "high": 61.345, "low": 59.48, "open": 61.345, "prev_close": 60.61}
+    "SPCX": {"price": 189.59, "change": -2.23, "change_pct": -1.1625, "high": 190.345, "low": 172.11, "open": 190.345, "prev_close": 191.82},
+    "INTC": {"price": 133.67, "change": 12.57, "change_pct": 10.3799, "high": 135.48, "low": 127.9, "open": 130.2825, "prev_close": 121.1},
+    "AAL": {"price": 16.04, "change": 0.62, "change_pct": 4.0208, "high": 16.07, "low": 15.754999999999999, "open": 15.754999999999999, "prev_close": 15.42},
+    "ADBE": {"price": 194.93, "change": -1.35, "change_pct": -0.6878, "high": 196.78, "low": 190.12, "open": 195.655, "prev_close": 196.28},
+    "OKLO": {"price": 60.97, "change": 2.15, "change_pct": 3.6552, "high": 63, "low": 58.56, "open": 59.980000000000004, "prev_close": 58.82},
+    "SWBI": {"price": 16.01, "change": 2.28, "change_pct": 16.606, "high": 17.5625, "low": 15.63, "open": 15.760000000000002, "prev_close": 13.73},
+    "ACN": {"price": 126.85, "change": -29.16, "change_pct": -18.6911, "high": 142.60500000000002, "low": 126.5, "open": 142.60500000000002, "prev_close": 156.01},
+    "MU": {"price": 1139.61, "change": 96.42, "change_pct": 9.2428, "high": 1149.43, "low": 1092.7935, "open": 1096.6525000000001, "prev_close": 1043.19},
+    "AMD": {"price": 536.43, "change": 23.95, "change_pct": 4.6734, "high": 539.6199, "low": 526.315, "open": 529.2750000000001, "prev_close": 512.48},
+    "TSLA": {"price": 402.07, "change": 5.69, "change_pct": 1.4355, "high": 402.11, "low": 384.7, "open": 398.5325, "prev_close": 396.38},
+    "BAC": {"price": 56.23, "change": -0.3, "change_pct": -0.5307, "high": 57.33, "low": 56.03, "open": 56.92, "prev_close": 56.53},
+    "JPM": {"price": 326.17, "change": -7.29, "change_pct": -2.1862, "high": 338.09, "low": 324.16, "open": 336, "prev_close": 333.46},
+    "KR": {"price": 56.61, "change": -5.21, "change_pct": -8.4277, "high": 60.56, "low": 56.32, "open": 60.56, "prev_close": 61.82},
+    "GLD": {"price": 386.87, "change": -1.73, "change_pct": -0.4452, "high": 392.5, "low": 385.6, "open": 392.345, "prev_close": 388.6},
+    "SLV": {"price": 59.55, "change": -1.06, "change_pct": -1.7489, "high": 61.345, "low": 58.85, "open": 61.345, "prev_close": 60.61}
   }
 }
