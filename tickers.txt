@@ -13,3 +13,4 @@ JPM
 KR
 GLD
 SLV
+UEC
