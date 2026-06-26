@@ -1,6 +1,6 @@
 {
-  "updated": "2026-06-25T22:43:46Z",
-  "updated_ct": "2026-06-25 17:43:46 CDT",
+  "updated": "2026-06-26T12:07:47Z",
+  "updated_ct": "2026-06-26 07:07:47 CDT",
   "quotes": {
     "SPCX": {"price": 153, "change": -1.54, "change_pct": -0.9965, "high": 160.65, "low": 150, "open": 156.625, "prev_close": 154.54},
     "INTC": {"price": 132.87, "change": 1.22, "change_pct": 0.9267, "high": 140.72, "low": 125.41, "open": 139.73, "prev_close": 131.65},
