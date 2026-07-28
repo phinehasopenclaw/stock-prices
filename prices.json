@@ -1,8 +1,8 @@
 {
-  "updated": "2026-07-28T20:05:58Z",
-  "updated_ct": "2026-07-28 15:05:58 CDT",
+  "updated": "2026-07-28T21:18:01Z",
+  "updated_ct": "2026-07-28 16:18:01 CDT",
   "quotes": {
-    "SPCX": {"price": 116.4896, "change": 2.9896, "change_pct": 2.634, "high": 118.13, "low": 107.01, "open": 109.32, "prev_close": 113.5},
+    "SPCX": {"price": 116.41, "change": 2.91, "change_pct": 2.5639, "high": 118.13, "low": 107.01, "open": 109.32, "prev_close": 113.5},
     "INTC": {"price": 86.3, "change": -5.37, "change_pct": -5.858, "high": 88.2799, "low": 83.1, "open": 86.62, "prev_close": 91.67},
     "AAL": {"price": 15.36, "change": 0.41, "change_pct": 2.7425, "high": 15.41, "low": 14.74, "open": 14.95, "prev_close": 14.95},
     "ADBE": {"price": 249.18, "change": 11.43, "change_pct": 4.8076, "high": 254.06, "low": 241.6946, "open": 242.85, "prev_close": 237.75},
