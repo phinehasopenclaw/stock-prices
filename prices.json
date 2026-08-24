@@ -1,9 +1,9 @@
 {
-  "updated": "2026-08-24T20:12:06Z",
-  "updated_ct": "2026-08-24 15:12:06 CDT",
+  "updated": "2026-08-24T20:47:39Z",
+  "updated_ct": "2026-08-24 15:47:39 CDT",
   "quotes": {
     "SPCX": {"price": 135, "change": -1.97, "change_pct": -1.4383, "high": 138.33, "low": 133.1, "open": 134.355, "prev_close": 136.97},
-    "INTC": {"price": 87.246248, "change": -2.823752, "change_pct": -3.1351, "high": 88.91, "low": 85.14, "open": 88.86, "prev_close": 90.07},
+    "INTC": {"price": 87.26, "change": -2.81, "change_pct": -3.1198, "high": 88.91, "low": 85.14, "open": 88.86, "prev_close": 90.07},
     "AAL": {"price": 13.63, "change": -0.19, "change_pct": -1.3748, "high": 14.07, "low": 13.55, "open": 13.96, "prev_close": 13.82},
     "ADBE": {"price": 276.27, "change": 0.97, "change_pct": 0.3523, "high": 279, "low": 273.245, "open": 275, "prev_close": 275.3},
     "OKLO": {"price": 39.69, "change": -2.4, "change_pct": -5.7021, "high": 41.3, "low": 39.42, "open": 41.135, "prev_close": 42.09},
@@ -11,7 +11,7 @@
     "ACN": {"price": 186.53, "change": 1.25, "change_pct": 0.6747, "high": 188.08, "low": 183.43, "open": 184.64, "prev_close": 185.28},
     "MU": {"price": 910.43, "change": -56.35, "change_pct": -5.8286, "high": 936.45, "low": 887.605, "open": 934.78, "prev_close": 966.78},
     "AMD": {"price": 456.745, "change": -16.505, "change_pct": -3.4876, "high": 468.54, "low": 451, "open": 468.54, "prev_close": 473.25},
-    "TSLA": {"price": 349.03, "change": -13.83, "change_pct": -3.8114, "high": 363.24, "low": 348.26, "open": 361.41, "prev_close": 362.86},
+    "TSLA": {"price": 348.95, "change": -13.91, "change_pct": -3.8334, "high": 363.24, "low": 348.26, "open": 361.41, "prev_close": 362.86},
     "BAC": {"price": 62.33, "change": 0.64, "change_pct": 1.0374, "high": 62.76, "low": 61.52, "open": 61.74, "prev_close": 61.69},
     "JPM": {"price": 356.39, "change": 4.81, "change_pct": 1.3681, "high": 358.28, "low": 352.815, "open": 353.3, "prev_close": 351.58},
     "KR": {"price": 59.08, "change": 1.18, "change_pct": 2.038, "high": 59.2, "low": 58.16, "open": 58.24, "prev_close": 57.9},
