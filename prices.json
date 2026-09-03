@@ -1,6 +1,6 @@
 {
-  "updated": "2026-09-03T20:08:26Z",
-  "updated_ct": "2026-09-03 15:08:26 CDT",
+  "updated": "2026-09-03T22:32:06Z",
+  "updated_ct": "2026-09-03 17:32:06 CDT",
   "quotes": {
     "SPCX": {"price": 149.74, "change": 9.03, "change_pct": 6.4175, "high": 152.3, "low": 141.05, "open": 141.361, "prev_close": 140.71},
     "INTC": {"price": 91.67, "change": 1.62, "change_pct": 1.799, "high": 92.37, "low": 87.725, "open": 89.35, "prev_close": 90.05},
@@ -10,7 +10,7 @@
     "SWBI": {"price": 12.27, "change": -0.51, "change_pct": -3.9906, "high": 12.825, "low": 12.0945, "open": 12.78, "prev_close": 12.78},
     "ACN": {"price": 193.12, "change": 5.44, "change_pct": 2.8986, "high": 195.32, "low": 189.09, "open": 190, "prev_close": 187.68},
     "MU": {"price": 958.16, "change": 2.08, "change_pct": 0.2176, "high": 959.76, "low": 918.8801, "open": 956.91, "prev_close": 956.08},
-    "AMD": {"price": 456.219, "change": -0.841, "change_pct": -0.184, "high": 459.77, "low": 440.5, "open": 453.15, "prev_close": 457.06},
+    "AMD": {"price": 456.16, "change": -0.9, "change_pct": -0.1969, "high": 459.77, "low": 440.5, "open": 453.15, "prev_close": 457.06},
     "TSLA": {"price": 376.365, "change": 19.355, "change_pct": 5.4214, "high": 384.04, "low": 365.82, "open": 365.82, "prev_close": 357.01},
     "BAC": {"price": 63.04, "change": 0.44, "change_pct": 0.7029, "high": 63.27, "low": 62.32, "open": 62.81, "prev_close": 62.6},
     "JPM": {"price": 362.06, "change": 5.84, "change_pct": 1.6394, "high": 362.85, "low": 356.39, "open": 358.675, "prev_close": 356.22},
