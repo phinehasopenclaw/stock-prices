@@ -20,52 +20,95 @@ jobs:
         env:
           FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
         run: |
-          # Read tickers from file
-          TICKERS=$(cat tickers.txt | tr '\n' ' ')
-          
-          # Build JSON output
-          echo '{' > prices.json
-          echo '  "updated": "'$(date -u '+%Y-%m-%dT%H:%M:%SZ')'",' >> prices.json
-          echo '  "updated_ct": "'$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z')'",' >> prices.json
-          echo '  "quotes": {' >> prices.json
-          
+          set -o pipefail
+
+          # Guard 1: secret must exist
+          if [ -z "${FINNHUB_KEY:-}" ]; then
+            echo "::error::FINNHUB_KEY secret is missing or empty"
+            exit 1
+          fi
+
+          # Fetch one quote; retry once on an error or unreadable response
+          fetch() {
+            local r=""
+            for attempt in 1 2; do
+              r=$(curl -s --max-time 15 "https://finnhub.io/api/v1/quote?symbol=$1&token=${FINNHUB_KEY}" || true)
+              if echo "$r" | jq -e 'type == "object" and (has("error") | not)' >/dev/null 2>&1; then
+                echo "$r"
+                return 0
+              fi
+              sleep 3
+            done
+            echo "$r"
+            return 1
+          }
+
+          TICKERS=$(tr -d '\r' < tickers.txt | tr '\n' ' ')
+          OUT=$(mktemp)
+          TOTAL=0
+          ZERO=0
+
+          echo '{' > "$OUT"
+          echo '  "updated": "'$(date -u '+%Y-%m-%dT%H:%M:%SZ')'",' >> "$OUT"
+          echo '  "updated_ct": "'$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z')'",' >> "$OUT"
+          echo '  "quotes": {' >> "$OUT"
+
           FIRST=true
           for TICKER in $TICKERS; do
             # Skip empty lines and comments
             [[ -z "$TICKER" || "$TICKER" == \#* ]] && continue
-            
-            # Fetch quote from Finnhub
-            QUOTE=$(curl -s "https://finnhub.io/api/v1/quote?symbol=${TICKER}&token=${FINNHUB_KEY}")
-            
-            # Extract values
-            C=$(echo $QUOTE | jq -r '.c // 0')
-            D=$(echo $QUOTE | jq -r '.d // 0')
-            DP=$(echo $QUOTE | jq -r '.dp // 0')
-            H=$(echo $QUOTE | jq -r '.h // 0')
-            L=$(echo $QUOTE | jq -r '.l // 0')
-            O=$(echo $QUOTE | jq -r '.o // 0')
-            PC=$(echo $QUOTE | jq -r '.pc // 0')
-            
+            TOTAL=$((TOTAL + 1))
+
+            # Guard 2: any API error (bad key, rate limit that survives a retry) fails the run
+            if ! QUOTE=$(fetch "$TICKER"); then
+              echo "::error::Finnhub request failed on $TICKER: $QUOTE"
+              exit 1
+            fi
+
+            C=$(echo "$QUOTE" | jq -r '.c // 0')
+            D=$(echo "$QUOTE" | jq -r '.d // 0')
+            DP=$(echo "$QUOTE" | jq -r '.dp // 0')
+            H=$(echo "$QUOTE" | jq -r '.h // 0')
+            L=$(echo "$QUOTE" | jq -r '.l // 0')
+            O=$(echo "$QUOTE" | jq -r '.o // 0')
+            PC=$(echo "$QUOTE" | jq -r '.pc // 0')
+
+            if [ "$C" = "0" ]; then
+              echo "::warning::$TICKER returned a zero price (bad or delisted symbol?)"
+              ZERO=$((ZERO + 1))
+            fi
+
             # Add comma separator after first entry
             if [ "$FIRST" = true ]; then
               FIRST=false
             else
-              echo ',' >> prices.json
+              echo ',' >> "$OUT"
             fi
-            
-            # Write ticker data
+
             printf '    "%s": {"price": %s, "change": %s, "change_pct": %s, "high": %s, "low": %s, "open": %s, "prev_close": %s}' \
-              "$TICKER" "$C" "$D" "$DP" "$H" "$L" "$O" "$PC" >> prices.json
-            
+              "$TICKER" "$C" "$D" "$DP" "$H" "$L" "$O" "$PC" >> "$OUT"
+
             # Rate limit: Finnhub free tier = 60 calls/min
             sleep 1
           done
-          
-          echo '' >> prices.json
-          echo '  }' >> prices.json
-          echo '}' >> prices.json
-          
-          # Display for logs
+
+          echo '' >> "$OUT"
+          echo '  }' >> "$OUT"
+          echo '}' >> "$OUT"
+
+          # Guard 3: never replace good prices with an all-zero file
+          if [ "$TOTAL" -eq 0 ] || [ "$ZERO" -eq "$TOTAL" ]; then
+            echo "::error::All $TOTAL tickers returned zero prices; keeping the last good prices.json"
+            exit 1
+          fi
+
+          # Guard 4: output must be valid JSON
+          if ! jq -e . "$OUT" >/dev/null; then
+            echo "::error::Built invalid JSON; keeping the last good prices.json"
+            exit 1
+          fi
+
+          mv "$OUT" prices.json
           cat prices.json
 
       - name: Commit and push
