@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Fetch prices from Finnhub
         env:
@@ -27,6 +27,37 @@ jobs:
             echo "::error::FINNHUB_KEY secret is missing or empty"
             exit 1
           fi
+
+          # ---- Market status (Finnhub, with clock fallback) ----
+          MS=$(curl -s --max-time 15 "https://finnhub.io/api/v1/stock/market-status?exchange=US&token=${FINNHUB_KEY}" || true)
+          if echo "$MS" | jq -e 'type == "object" and has("isOpen")' >/dev/null 2>&1; then
+            HOLIDAY=$(echo "$MS" | jq -r '.holiday // empty')
+            SESSION=$(echo "$MS" | jq -r '.session // empty')
+            IS_OPEN=$(echo "$MS" | jq -r '.isOpen')
+            if [ -n "$HOLIDAY" ] && [ "$IS_OPEN" != "true" ]; then
+              STATUS="holiday"; NOTE="Market closed ($HOLIDAY) - prices are the last close."
+            elif [ "$IS_OPEN" = "true" ] && [ "$SESSION" = "regular" ]; then
+              STATUS="open"; NOTE="Market open - live prices."
+            elif [ "$SESSION" = "pre-market" ]; then
+              STATUS="pre-market"; NOTE="Pre-market - prices are the last regular-session close."
+            elif [ "$SESSION" = "post-market" ]; then
+              STATUS="after-hours"; NOTE="After hours - prices are today's close."
+            else
+              STATUS="closed"; NOTE="Market closed - prices are the last close."
+            fi
+          else
+            # Fallback: regular session by the clock (does not know holidays)
+            DOW=$(TZ='America/New_York' date +%u)
+            HM=$(TZ='America/New_York' date +%H%M)
+            if [ "$DOW" -le 5 ] && [ "$HM" -ge 0930 ] && [ "$HM" -lt 1600 ]; then
+              STATUS="open"; NOTE="Market open by clock - live prices (holiday calendar unavailable)."
+            else
+              STATUS="closed"; NOTE="Market closed by clock - prices are the last close (holiday calendar unavailable)."
+            fi
+            echo "::warning::Market-status lookup failed; using clock-based status ($STATUS)"
+          fi
+          if [ "$STATUS" = "open" ]; then PRICE_TYPE="live"; else PRICE_TYPE="close"; fi
+          echo "Market status: $STATUS"
 
           # Fetch one quote; retry once on an error or unreadable response
           fetch() {
@@ -44,16 +75,11 @@ jobs:
           }
 
           TICKERS=$(tr -d '\r' < tickers.txt | tr '\n' ' ')
-          OUT=$(mktemp)
+          QUOTES='{}'
           TOTAL=0
           ZERO=0
+          LATEST_T=0
 
-          echo '{' > "$OUT"
-          echo '  "updated": "'$(date -u '+%Y-%m-%dT%H:%M:%SZ')'",' >> "$OUT"
-          echo '  "updated_ct": "'$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z')'",' >> "$OUT"
-          echo '  "quotes": {' >> "$OUT"
-
-          FIRST=true
           for TICKER in $TICKERS; do
             # Skip empty lines and comments
             [[ -z "$TICKER" || "$TICKER" == \#* ]] && continue
@@ -66,35 +92,27 @@ jobs:
             fi
 
             C=$(echo "$QUOTE" | jq -r '.c // 0')
-            D=$(echo "$QUOTE" | jq -r '.d // 0')
-            DP=$(echo "$QUOTE" | jq -r '.dp // 0')
-            H=$(echo "$QUOTE" | jq -r '.h // 0')
-            L=$(echo "$QUOTE" | jq -r '.l // 0')
-            O=$(echo "$QUOTE" | jq -r '.o // 0')
-            PC=$(echo "$QUOTE" | jq -r '.pc // 0')
-
+            T=$(echo "$QUOTE" | jq -r '.t // 0')
             if [ "$C" = "0" ]; then
               echo "::warning::$TICKER returned a zero price (bad or delisted symbol?)"
               ZERO=$((ZERO + 1))
             fi
-
-            # Add comma separator after first entry
-            if [ "$FIRST" = true ]; then
-              FIRST=false
+            if [ "$T" -gt 0 ] 2>/dev/null; then
+              AS_OF=$(TZ='America/Chicago' date -d "@$T" '+%Y-%m-%d %H:%M %Z')
+              [ "$T" -gt "$LATEST_T" ] && LATEST_T=$T
             else
-              echo ',' >> "$OUT"
+              AS_OF=""
             fi
 
-            printf '    "%s": {"price": %s, "change": %s, "change_pct": %s, "high": %s, "low": %s, "open": %s, "prev_close": %s}' \
-              "$TICKER" "$C" "$D" "$DP" "$H" "$L" "$O" "$PC" >> "$OUT"
+            QUOTES=$(echo "$QUOTES" | jq -c --arg k "$TICKER" --argjson q "$QUOTE" \
+              --arg type "$PRICE_TYPE" --arg asof "$AS_OF" \
+              '. + {($k): {price: ($q.c // 0), change: ($q.d // 0), change_pct: ($q.dp // 0),
+                           high: ($q.h // 0), low: ($q.l // 0), open: ($q.o // 0),
+                           prev_close: ($q.pc // 0), price_type: $type, as_of_ct: $asof}}')
 
             # Rate limit: Finnhub free tier = 60 calls/min
             sleep 1
           done
-
-          echo '' >> "$OUT"
-          echo '  }' >> "$OUT"
-          echo '}' >> "$OUT"
 
           # Guard 3: never replace good prices with an all-zero file
           if [ "$TOTAL" -eq 0 ] || [ "$ZERO" -eq "$TOTAL" ]; then
@@ -102,10 +120,34 @@ jobs:
             exit 1
           fi
 
+          if [ "$LATEST_T" -gt 0 ]; then
+            PRICES_AS_OF=$(TZ='America/Chicago' date -d "@$LATEST_T" '+%Y-%m-%d %H:%M %Z')
+          else
+            PRICES_AS_OF=""
+          fi
+
+          OUT=$(mktemp)
+          jq -n --arg u "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+                --arg uct "$(TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z')" \
+                --arg st "$STATUS" --arg note "$NOTE" --arg asof "$PRICES_AS_OF" \
+                --argjson q "$QUOTES" \
+                '{updated: $u, updated_ct: $uct, market_status: $st, market_note: $note,
+                  prices_as_of_ct: $asof, quotes: $q}' > "$OUT"
+
           # Guard 4: output must be valid JSON
           if ! jq -e . "$OUT" >/dev/null; then
             echo "::error::Built invalid JSON; keeping the last good prices.json"
             exit 1
+          fi
+
+          # Outside market hours, skip the write when nothing changed (avoids a commit every 5 minutes)
+          if [ "$STATUS" != "open" ] && [ -f prices.json ]; then
+            OLD=$(jq -S -c '{s: .market_status, q: .quotes}' prices.json 2>/dev/null || echo "none")
+            NEW=$(jq -S -c '{s: .market_status, q: .quotes}' "$OUT")
+            if [ "$OLD" = "$NEW" ]; then
+              echo "Market $STATUS and prices unchanged; no update needed."
+              exit 0
+            fi
           fi
 
           mv "$OUT" prices.json
