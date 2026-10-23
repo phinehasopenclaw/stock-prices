@@ -1,185 +1,185 @@
 {
-  "updated": "2026-10-23T14:35:06Z",
-  "updated_ct": "2026-10-23 09:35:06 CDT",
+  "updated": "2026-10-23T18:40:46Z",
+  "updated_ct": "2026-10-23 13:40:46 CDT",
   "market_status": "open",
   "market_note": "Market open - live prices.",
-  "prices_as_of_ct": "2026-10-23 09:34 CDT",
+  "prices_as_of_ct": "2026-10-23 13:40 CDT",
   "quotes": {
     "SPCX": {
-      "price": 148.39,
-      "change": 3.64,
-      "change_pct": 2.5147,
-      "high": 148.8,
+      "price": 147.1,
+      "change": 2.35,
+      "change_pct": 1.6235,
+      "high": 149.75,
       "low": 144.085,
       "open": 147.92,
       "prev_close": 144.75,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:39 CDT"
     },
     "INTC": {
-      "price": 86.85,
-      "change": 1.36,
-      "change_pct": 1.5908,
-      "high": 87.2099,
+      "price": 86.8,
+      "change": 1.31,
+      "change_pct": 1.5323,
+      "high": 87.875,
       "low": 84.74,
       "open": 86.4775,
       "prev_close": 85.49,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "AAL": {
-      "price": 11.96,
-      "change": -0.64,
-      "change_pct": -5.0794,
+      "price": 11.98,
+      "change": -0.62,
+      "change_pct": -4.9206,
       "high": 12.405,
       "low": 11.81,
       "open": 12.395,
       "prev_close": 12.6,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "ADBE": {
-      "price": 263.87,
-      "change": -6.68,
-      "change_pct": -2.469,
+      "price": 264.42,
+      "change": -6.13,
+      "change_pct": -2.2658,
       "high": 271.5,
-      "low": 263.47,
+      "low": 263.26,
       "open": 267.41,
       "prev_close": 270.55,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "OKLO": {
-      "price": 26.18,
-      "change": -0.83,
-      "change_pct": -3.0729,
+      "price": 26.46,
+      "change": -0.55,
+      "change_pct": -2.0363,
       "high": 26.945,
       "low": 26.07,
       "open": 26.945,
       "prev_close": 27.01,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "SWBI": {
-      "price": 14.21,
-      "change": -0.14,
-      "change_pct": -0.9756,
+      "price": 13.62,
+      "change": -0.73,
+      "change_pct": -5.0871,
       "high": 14.44,
-      "low": 14.19,
+      "low": 13.32,
       "open": 14.32,
       "prev_close": 14.35,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "ACN": {
-      "price": 243.78,
-      "change": -14.96,
-      "change_pct": -5.7819,
+      "price": 247.61,
+      "change": -11.13,
+      "change_pct": -4.3016,
       "high": 254.435,
       "low": 242.0101,
       "open": 252.835,
       "prev_close": 258.74,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "MU": {
-      "price": 882.61,
-      "change": 26.12,
-      "change_pct": 3.0497,
-      "high": 888.6,
+      "price": 880.24,
+      "change": 23.75,
+      "change_pct": 2.7729,
+      "high": 891.89,
       "low": 858.34,
       "open": 869.155,
       "prev_close": 856.49,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "AMD": {
-      "price": 518.5,
-      "change": 10.57,
-      "change_pct": 2.081,
-      "high": 519.68,
+      "price": 517.54,
+      "change": 9.61,
+      "change_pct": 1.892,
+      "high": 523.92,
       "low": 508.3571,
       "open": 513.555,
       "prev_close": 507.93,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "TSLA": {
-      "price": 370.65,
-      "change": -3.93,
-      "change_pct": -1.0492,
-      "high": 375.933,
+      "price": 371.56,
+      "change": -3.02,
+      "change_pct": -0.8062,
+      "high": 377.32,
       "low": 365.27,
       "open": 374.685,
       "prev_close": 374.58,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "BAC": {
-      "price": 50.49,
-      "change": -0.59,
-      "change_pct": -1.1551,
-      "high": 50.88,
+      "price": 50.7,
+      "change": -0.38,
+      "change_pct": -0.7439,
+      "high": 50.92,
       "low": 50.3,
       "open": 50.88,
       "prev_close": 51.08,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "JPM": {
-      "price": 330.95,
-      "change": -5.59,
-      "change_pct": -1.661,
+      "price": 331.86,
+      "change": -4.68,
+      "change_pct": -1.3906,
       "high": 335.1405,
       "low": 330.4,
       "open": 334.605,
       "prev_close": 336.54,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "KR": {
-      "price": 67.62,
-      "change": -0.25,
-      "change_pct": -0.3684,
+      "price": 66.58,
+      "change": -1.29,
+      "change_pct": -1.9007,
       "high": 68.56,
-      "low": 67.54,
+      "low": 66.46,
       "open": 67.615,
       "prev_close": 67.87,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "GLD": {
-      "price": 365.01,
-      "change": -3.99,
-      "change_pct": -1.0813,
+      "price": 366.23,
+      "change": -2.77,
+      "change_pct": -0.7507,
       "high": 369.25,
       "low": 364.33,
       "open": 368.2275,
       "prev_close": 369,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "SLV": {
-      "price": 48.24,
-      "change": -1.1,
-      "change_pct": -2.2294,
-      "high": 48.8671,
+      "price": 48.71,
+      "change": -0.63,
+      "change_pct": -1.2769,
+      "high": 48.98,
       "low": 47.865,
       "open": 48.6175,
       "prev_close": 49.34,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     },
     "UEC": {
-      "price": 7.25,
-      "change": -0.23,
-      "change_pct": -3.0749,
-      "high": 7.44,
+      "price": 7.44,
+      "change": -0.04,
+      "change_pct": -0.5348,
+      "high": 7.46,
       "low": 6.75,
       "open": 7.359999999999999,
       "prev_close": 7.48,
       "price_type": "live",
-      "as_of_ct": "2026-10-23 09:34 CDT"
+      "as_of_ct": "2026-10-23 13:40 CDT"
     }
   }
 }
