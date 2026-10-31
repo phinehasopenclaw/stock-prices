@@ -1,8 +1,8 @@
 {
-  "updated": "2026-10-30T20:57:56Z",
-  "updated_ct": "2026-10-30 15:57:56 CDT",
-  "market_status": "after-hours",
-  "market_note": "After hours - prices are today's close.",
+  "updated": "2026-10-31T00:28:05Z",
+  "updated_ct": "2026-10-30 19:28:05 CDT",
+  "market_status": "closed",
+  "market_note": "Market closed - prices are the last close.",
   "prices_as_of_ct": "2026-10-30 15:00 CDT",
   "quotes": {
     "SPCX": {
