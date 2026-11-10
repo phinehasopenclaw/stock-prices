@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gap Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: sticky status bar, rules strip, ranked setup cards, then the filtered-out table. */
+:root{
+  --bg:#0d1117;--panel:#141a22;--panel2:#1a222c;--line:#263140;--fg:#e4eaf1;--muted:#8a97a6;
+  --accent:#5fb4ff;--good:#3fb46a;--good-bg:rgba(63,180,106,.14);--warn:#d9a13a;--warn-bg:rgba(217,161,58,.14);
+  --bad:#f0605a;--bad-bg:rgba(240,96,90,.13);--info:#7aa7ff;--info-bg:rgba(122,167,255,.13);
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root{
+  --bg:#f4f6f9;--panel:#ffffff;--panel2:#eef2f6;--line:#d7dee7;--fg:#141b24;--muted:#5b6876;
+  --accent:#1767c2;--good:#16834a;--good-bg:rgba(22,131,74,.1);--warn:#9a6a08;--warn-bg:rgba(154,106,8,.1);
+  --bad:#c4312b;--bad-bg:rgba(196,49,43,.09);--info:#2f5fc4;--info-bg:rgba(47,95,196,.09);color-scheme:light}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans);
+  padding:0 max(16px,env(safe-area-inset-left,0px)) 40px max(16px,env(safe-area-inset-right,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));padding-left:max(16px,env(safe-area-inset-left,0px))}
+.wrap{max-width:1180px;margin:0 auto}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:max(12px,env(safe-area-inset-top,0px));padding-bottom:10px;border-bottom:1px solid var(--line)}
+.hrow{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+h1{font:600 18px/1.2 var(--sans);margin:0;letter-spacing:.01em}
+h1 span{color:var(--muted);font-weight:400}
+.status{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font:12px var(--mono)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel);white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.pill.ok .dot{background:var(--good)}.pill.stale .dot{background:var(--warn)}.pill.dead .dot{background:var(--bad)}
+button,.btn{font:500 12px var(--sans);color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rules{display:flex;flex-wrap:wrap;gap:6px 14px;margin:12px 0 4px;font-size:12px;color:var(--muted)}
+.rules b{color:var(--fg);font-weight:600}
+.handsoff{margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--warn-bg);color:var(--warn);font:500 13px var(--sans)}
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.settings label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.settings input{font:13px var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+h2{font:600 13px var(--sans);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:22px 0 10px}
+h2 .n{color:var(--fg)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+@media (max-width:420px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-width:0;border-left:4px solid var(--line)}
+.card.A-TRIGGER{border-left-color:var(--good)}.card.A-WATCH{border-left-color:var(--good)}
+.card.B-BREAKOUT,.card.B-WATCH{border-left-color:var(--info)}.card.EXTENDED{border-left-color:var(--warn)}
+.card.flash{animation:flash 1.2s ease 2}
+@keyframes flash{50%{background:var(--good-bg)}}
+@media (prefers-reduced-motion:reduce){.card.flash{animation:none}}
+.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.sym{font:600 20px/1 var(--mono)}
+.nm{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.px{text-align:right;font-family:var(--mono)}
+.px .p{font-size:18px;font-weight:600}
+.up{color:var(--good)}.dn{color:var(--bad)}
+.live{font-size:10px;color:var(--accent);letter-spacing:.06em}
+.chip{display:inline-block;font:600 11px var(--mono);padding:3px 8px;border-radius:5px;letter-spacing:.03em}
+.chip.A-TRIGGER{background:var(--good);color:#06130b}.chip.A-WATCH{background:var(--good-bg);color:var(--good);border:1px solid var(--good)}
+.chip.B-BREAKOUT{background:var(--info);color:#071226}.chip.B-WATCH{background:var(--info-bg);color:var(--info)}
+.chip.EXTENDED{background:var(--warn-bg);color:var(--warn)}.chip.HOLDING,.chip.THIN,.chip.NO.DATA{background:var(--panel2);color:var(--muted)}
+.chip.FADING{background:var(--bad-bg);color:var(--bad)}
+.chip.cat{background:var(--panel2);color:var(--fg);font-weight:500}
+.chip.warnf{background:var(--bad-bg);color:var(--bad);font-weight:500}
+.note{font-size:13px;color:var(--fg)}
+.levels{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.lv{background:var(--panel2);border-radius:6px;padding:5px 7px;min-width:0}
+.lv i{display:block;font:500 10px var(--sans);font-style:normal;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.lv b{font-weight:600;font-size:13px}
+.lv.entry b{color:var(--good)}.lv.stop b{color:var(--bad)}
+.size{font:12px var(--mono);color:var(--muted)}
+.size b{color:var(--fg)}
+.stats{display:flex;flex-wrap:wrap;gap:4px 12px;font:12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.stats b{color:var(--fg);font-weight:500}
+.cat a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.cat a:hover{border-color:var(--accent)}
+.cat small{color:var(--muted)}
+.tags{display:flex;flex-wrap:wrap;gap:5px}
+svg.spark{width:100%;height:64px;display:block}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font:12px var(--mono);font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+.empty{padding:28px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
+.err{color:var(--bad);font:12px var(--mono);margin-top:8px}
+footer{margin-top:24px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="hrow">
+    <h1>Gap Scanner <span>· A-setup first</span></h1>
+    <div class="status">
+      <span class="pill" id="sessPill"><span class="dot"></span><span id="sess">Session —</span></span>
+      <span class="pill" id="agePill"><span class="dot"></span><span id="age">No scan yet</span></span>
+      <span class="pill" id="livePill"><span class="dot"></span><span id="liveTxt">Live quotes off</span></span>
+      <button id="soundBtn" type="button">Alerts: off</button>
+      <button id="setBtn" type="button">Settings</button>
+    </div>
+  </div>
+  <div class="rules"><span><b>Limit orders only</b></span><span><b>Stop on fill</b></span><span><b>Size by risk</b>, not shares</span><span><b>No chasing</b> extended</span><span>3 setups max on screen</span></div>
+  <div class="handsoff" id="handsoff" hidden></div>
+  <div class="settings" id="settings" hidden>
+    <label for="riskIn">Risk per trade ($)<input id="riskIn" type="number" min="25" step="25" value="200"></label>
+    <label for="keyIn">Finnhub key (stays in this browser)<input id="keyIn" type="password" autocomplete="off" placeholder="paste key for live prices"></label>
+    <label for="maxIn">Cards to show<input id="maxIn" type="number" min="1" max="20" value="8"></label>
+  </div>
+  <div class="err" id="err" hidden></div>
+</header>
+
+<h2>Survivors <span class="n" id="survN"></span></h2>
+<div class="grid" id="cards"><div class="empty">Waiting for the first scan. The scanner runs every ~2 minutes from 5:15 to 15:15 CT on weekdays.</div></div>
+
+<h2>Filtered out <span class="n" id="rejN"></span></h2>
+<div class="tbl"><table>
+  <thead><tr><th>Ticker</th><th>Price</th><th>Chg</th><th>Setup</th><th>Rel vol</th><th>Why out</th></tr></thead>
+  <tbody id="rej"><tr><td colspan="6">—</td></tr></tbody>
+</table></div>
+
+<footer id="foot">Data: Yahoo screener and 5-minute bars via the scanner job; catalysts and live prices from Finnhub. Levels are mechanical reads of the 5-minute chart; confirm on your own chart before entering.</footer>
+</div>
+
+<script>
+const REPO = "phinehasopenclaw/stock-prices", BRANCH = "scan-data";
+const API = `https://api.github.com/repos/${REPO}/contents/scan.json?ref=${BRANCH}`;
+const RAW = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/scan.json`;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("gs_" + k); return v === null ? d : v; } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem("gs_" + k, v); } catch(e){} }
+};
+let scan = null, live = {}, alerted = new Set(), soundOn = store.get("sound","0") === "1";
+const fmt = (x, d = 2) => x == null || isNaN(x) ? "—" : Number(x).toFixed(d);
+const fmtBig = x => x == null ? "—" : x >= 1e9 ? (x/1e9).toFixed(2)+"B" : x >= 1e6 ? (x/1e6).toFixed(1)+"M" : x >= 1e3 ? (x/1e3).toFixed(0)+"K" : String(x);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ---- settings
+$("riskIn").value = store.get("risk", "200");
+$("keyIn").value = store.get("key", "");
+$("maxIn").value = store.get("max", "8");
+$("setBtn").onclick = () => { $("settings").hidden = !$("settings").hidden; };
+["riskIn","keyIn","maxIn"].forEach(id => $(id).addEventListener("change", () => {
+  store.set({riskIn:"risk",keyIn:"key",maxIn:"max"}[id], $(id).value.trim()); render(); pollLive();
+}));
+function setSoundBtn(){ $("soundBtn").textContent = "Alerts: " + (soundOn ? "on" : "off"); }
+setSoundBtn();
+$("soundBtn").onclick = async () => {
+  soundOn = !soundOn; store.set("sound", soundOn ? "1" : "0"); setSoundBtn();
+  if (soundOn) { beep(); try { if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission(); } catch(e){} }
+};
+let actx = null;
+function beep(){
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1320].forEach((f, i) => { const o = actx.createOscillator(), g = actx.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(actx.destination);
+      const t = actx.currentTime + i * 0.18; g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+      o.start(t); o.stop(t + 0.17); });
+  } catch(e){}
+}
+function alertOnce(key, title, body){
+  if (alerted.has(key)) return; alerted.add(key);
+  if (!soundOn) return;
+  beep();
+  try { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body }); } catch(e){}
+}
+
+// ---- data
+async function loadScan(){
+  let data = null, err = null;
+  try {
+    const r = await fetch(API, { headers: { Accept: "application/vnd.github.raw+json" }, cache: "no-store" });
+    if (r.ok) data = await r.json(); else err = "GitHub API " + r.status;
+  } catch(e){ err = e.message; }
+  if (!data) {
+    try { const r = await fetch(RAW + "?t=" + Date.now(), { cache: "no-store" }); if (r.ok) data = await r.json(); }
+    catch(e){ err = err || e.message; }
+  }
+  if (data) { $("err").hidden = true; checkTransitions(scan, data); scan = data; render(); }
+  else { $("err").hidden = false; $("err").textContent = "Could not load scan data (" + err + "). Retrying."; }
+}
+function checkTransitions(prev, next){
+  const before = {}; (prev?.survivors || []).forEach(r => before[r.sym] = r.setup);
+  (next.survivors || []).forEach(r => {
+    if (r.setup === "A-TRIGGER" && before[r.sym] !== "A-TRIGGER")
+      alertOnce(r.sym + "|trig|" + next.loop, `${r.sym} A-setup triggered`, `Entry ${fmt(r.entry)} · stop ${fmt(r.stop)} · ${r.setup_note || ""}`);
+  });
+}
+async function pollLive(){
+  const key = store.get("key", "");
+  const pill = $("livePill");
+  if (!key || !scan) { pill.className = "pill"; $("liveTxt").textContent = key ? "Live quotes ready" : "Live quotes off"; return; }
+  if (scan.session !== "REGULAR") { pill.className = "pill"; $("liveTxt").textContent = "Live quotes start 8:30 CT"; return; }
+  const syms = (scan.survivors || []).slice(0, Math.min(12, +store.get("max", "8") || 8)).map(r => r.sym);
+  let ok = 0;
+  await Promise.all(syms.map(async s => {
+    try {
+      const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(s)}&token=${encodeURIComponent(key)}`, { cache: "no-store" });
+      if (!r.ok) return; const q = await r.json();
+      if (q && q.c) { live[s] = { p: q.c, h: q.h, t: Date.now() }; ok++; }
+    } catch(e){}
+  }));
+  pill.className = "pill " + (ok ? "ok" : "dead");
+  $("liveTxt").textContent = ok ? `Live · ${ok} quotes` : "Live quotes failed";
+  render();
+}
+
+// ---- render
+function sparkSVG(sp){
+  if (!sp || !sp.c || sp.c.length < 2) return "";
+  const c = sp.c.filter(x => x != null), vw = (sp.vwap || []).filter(x => x != null), v = sp.v || [];
+  const all = c.concat(vw), lo = Math.min(...all), hi = Math.max(...all), W = 300, H = 64, PH = 46;
+  const x = (i, n) => (i / (n - 1)) * W, y = val => PH - ((val - lo) / ((hi - lo) || 1)) * (PH - 4) - 2;
+  const line = arr => arr.map((val, i) => `${i ? "L" : "M"}${x(i, arr.length).toFixed(1)},${y(val).toFixed(1)}`).join("");
+  const vmax = Math.max(...v, 1), bw = W / Math.max(v.length, 1);
+  const bars = v.map((val, i) => { const h = (val / vmax) * 16; return `<rect x="${(i*bw).toFixed(1)}" y="${(H-h).toFixed(1)}" width="${Math.max(bw-1,1).toFixed(1)}" height="${h.toFixed(1)}" fill="var(--line)"/>`; }).join("");
+  const up = c[c.length-1] >= c[0];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${bars}
+    ${vw.length > 1 ? `<path d="${line(vw)}" fill="none" stroke="var(--info)" stroke-width="1.2" stroke-dasharray="3 3"/>` : ""}
+    <path d="${line(c)}" fill="none" stroke="${up ? "var(--good)" : "var(--bad)"}" stroke-width="1.8"/>
+    <circle cx="${x(c.length-1, c.length)}" cy="${y(c[c.length-1])}" r="2.6" fill="${up ? "var(--good)" : "var(--bad)"}"/></svg>`;
+}
+function card(r){
+  const L = live[r.sym], price = L ? L.p : r.price;
+  const chg = r.prev_close ? (price / r.prev_close - 1) * 100 : r.chg_pct;
+  const risk = +store.get("risk", "200") || 200;
+  let size = "";
+  if (r.entry && r.stop && r.entry > r.stop) {
+    const sh = Math.floor(risk / (r.entry - r.stop));
+    size = `<div class="size">Size at $${risk} risk: <b>${sh.toLocaleString()} sh</b> · $${Math.round(sh * r.entry).toLocaleString()} deployed</div>`;
+  }
+  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH"].includes(r.setup))
+    alertOnce(r.sym + "|entry|" + r.entry, `${r.sym} through entry ${fmt(r.entry)}`, `Now ${fmt(price)} · stop ${fmt(r.stop)}`);
+  const lv = r.entry ? `<div class="levels">
+      <div class="lv entry"><i>Entry ≥</i><b>${fmt(r.entry)}</b></div>
+      <div class="lv stop"><i>Stop</i><b>${fmt(r.stop)}</b></div>
+      <div class="lv"><i>T1</i><b>${fmt(r.t1)}</b></div>
+      <div class="lv"><i>Risk</i><b>${fmt(r.risk_pct,1)}%</b></div></div>` :
+    r.pullback_zone ? `<div class="levels"><div class="lv entry" style="grid-column:span 2"><i>Pullback zone</i><b>${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}</b></div><div class="lv"><i>VWAP</i><b>${fmt(r.vwap)}</b></div><div class="lv"><i>Ext</i><b>${fmt(r.ext_pct,1)}%</b></div></div>` : "";
+  const cat = r.catalyst ? `<div class="cat"><a href="${esc(r.catalyst.url)}" target="_blank" rel="noopener">${esc(r.catalyst.headline)}</a> <small>${esc(r.catalyst.source || "")} · ${esc(r.catalyst.time)}</small></div>`
+    : `<div class="cat"><small>${r.catalyst_strength === "squeeze" ? "No news. Low-float volume squeeze." : "No company news found."}</small></div>`;
+  const tags = [`<span class="chip cat">Catalyst: ${esc(r.catalyst_strength)}</span>`]
+    .concat((r.warnings || []).map(w => `<span class="chip warnf">${esc(w)}</span>`)).join("");
+  return `<article class="card ${esc(r.setup)}" data-sym="${esc(r.sym)}">
+    <div class="top"><div style="min-width:0"><div class="sym">${esc(r.sym)}</div><div class="nm">${esc(r.name)}</div></div>
+      <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div><div class="${chg >= 0 ? "up" : "dn"}">${chg >= 0 ? "+" : ""}${fmt(chg,1)}%</div>${L ? `<div class="live">LIVE</div>` : ""}</div></div>
+    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span></div>
+    <div class="note">${esc(r.setup_note || "")}</div>
+    ${lv}${size}
+    ${sparkSVG(r.spark)}
+    <div class="stats"><span>VWAP <b>${fmt(r.vwap)}</b></span><span>High <b>${fmt(r.sess_high)}</b></span><span>PM <b>${fmt(r.pm_low)}–${fmt(r.pm_high)}</b></span>
+      <span>Rel vol <b>${fmt(r.rel_vol,1)}x</b></span><span>Surge <b>${fmt(r.vol_surge,1)}x</b></span><span>Float <b>${fmtBig(r.float)}</b></span><span>Cap <b>${fmtBig(r.mcap)}</b></span></div>
+    ${cat}<div class="tags">${tags}</div>
+  </article>`;
+}
+function render(){
+  if (!scan) return;
+  const max = +store.get("max", "8") || 8, surv = scan.survivors || [], rej = scan.rejected || [];
+  $("survN").textContent = `· ${surv.length}`;
+  $("rejN").textContent = `· ${rej.length}`;
+  $("cards").innerHTML = surv.length ? surv.slice(0, max).map(card).join("")
+    : `<div class="empty">No names pass all three checks right now (catalyst, holding above VWAP, liquidity). ${scan.movers_count || 0} stocks are up ${scan.params?.gap_min ?? 5}%+. Waiting is a position.</div>`;
+  $("rej").innerHTML = rej.length ? rej.slice(0, 40).map(r => `<tr><td><b>${esc(r.sym)}</b></td><td>${fmt(r.price)}</td>
+      <td class="${(r.chg_pct||0) >= 0 ? "up" : "dn"}">${fmt(r.chg_pct,1)}%</td><td>${esc(r.setup || "—")}</td><td>${fmt(r.rel_vol,1)}x</td>
+      <td>${esc((r.reject || []).join(", "))}${(r.warnings||[]).length ? " · ⚠ " + esc(r.warnings.join(", ")) : ""}</td></tr>`).join("")
+    : `<tr><td colspan="6">None</td></tr>`;
+  const sessMap = { PRE: "Pre-market", REGULAR: "Market open", POST: "After hours", CLOSED: "Closed" };
+  $("sess").textContent = sessMap[scan.session] || scan.session;
+  $("sessPill").className = "pill " + (scan.session === "REGULAR" ? "ok" : scan.session === "PRE" ? "stale" : "");
+  $("foot").textContent = `Universe ${scan.universe_size ?? "—"} stocks · ${scan.movers_count ?? "—"} up ${scan.params?.gap_min}%+ · scan took ${scan.scan_seconds}s · loop ${scan.loop}`
+    + (scan.errors?.length ? ` · issues: ${scan.errors.join("; ")}` : "") + ". Levels are mechanical reads of the 5-minute chart; confirm on your own chart before entering.";
+  tick();
+}
+function tick(){
+  if (scan) {
+    const age = (Date.now() - new Date(scan.updated_utc).getTime()) / 1000;
+    $("age").textContent = `Scan ${age < 90 ? Math.round(age) + "s" : Math.round(age / 60) + "m"} ago · ${scan.updated_ct.slice(11, 16)} CT`;
+    $("agePill").className = "pill " + (age < 300 ? "ok" : age < 900 ? "stale" : "dead");
+  }
+  // Hands-off window: 8:30–8:45 CT on weekdays.
+  const ct = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Chicago" }));
+  const mins = ct.getHours() * 60 + ct.getMinutes(), wd = ct.getDay() >= 1 && ct.getDay() <= 5;
+  const ho = $("handsoff");
+  if (wd && mins >= 510 && mins < 525) { ho.hidden = false; ho.textContent = `Hands off: the open is flushing. A-setups start forming in ${525 - mins} min (8:45 CT).`; }
+  else if (wd && mins < 510 && mins >= 300) { ho.hidden = false; ho.textContent = `Pre-market: build the list, set alerts at VWAP and the highs. Bell in ${Math.floor((510 - mins) / 60)}h ${(510 - mins) % 60}m.`; }
+  else ho.hidden = true;
+}
+loadScan();
+setInterval(loadScan, 75000);
+setInterval(pollLive, 20000);
+setInterval(tick, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadScan(); pollLive(); } });
+</script>
+</body>
+</html>
