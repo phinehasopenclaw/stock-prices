@@ -64,9 +64,23 @@ WARN_WORDS = {
 }
 ROUNDUP = re.compile(
     r"movers|stocks moving|gainers|losers|most active|unusual volume|top stocks|"
-    r"premarket|pre-market|mid-day|midday|after-hours|session top|shares are trading",
+    r"premarket|pre-market|mid-day|midday|after-hours|session top|shares are trading|"
+    r"\bdow\b|s&p 500|nasdaq composite|stock market|wall street|stocks to watch|"
+    r"stocks making|points;|market update|market wrap|\d+ stocks|top \d+|here are",
     re.I,
 )
+GENERIC_NAME_WORDS = {"the", "inc", "corp", "corporation", "holdings", "group", "company",
+                      "limited", "ltd", "technologies", "international", "global", "systems"}
+
+
+def about_company(n, row):
+    """True when a headline is about this company, not a market roundup that tags it."""
+    text = (n.get("headline", "") + " " + n.get("summary", "")[:400])
+    if re.search(r"\b" + re.escape(row["sym"]) + r"\b", text):
+        return True
+    words = [w for w in re.findall(r"[A-Za-z]{4,}", row.get("name") or "")
+             if w.lower() not in GENERIC_NAME_WORDS]
+    return bool(words) and words[0].lower() in text.lower()
 
 _news_cache = {}
 _state = {"loop": 0, "errors": []}
@@ -399,7 +413,11 @@ def check_news(row):
         _news_cache[sym] = (time.time(), items)
 
     cutoff = time.time() - 3 * 86400
-    specific = [n for n in items if n.get("datetime", 0) >= cutoff and not ROUNDUP.search(n.get("headline", ""))]
+    specific = [n for n in items if n.get("datetime", 0) >= cutoff
+                and not ROUNDUP.search(n.get("headline", "")) and about_company(n, row)]
+    # Headlines that name the company outrank ones that only mention it in the summary.
+    specific.sort(key=lambda n: (not about_company({"headline": n.get("headline", "")}, row),
+                                 -n.get("datetime", 0)))
     cat, warns = None, set()
     for n in specific:
         text = (n.get("headline", "") + " " + n.get("summary", "")[:300]).lower()
@@ -447,7 +465,8 @@ def apply_filter(r):
         r["catalyst_strength"] = "squeeze"
     reasons = []
     if not r["filter"]["catalyst"]:
-        reasons.append("No catalyst")
+        if r.get("catalyst_strength") != "unchecked":
+            reasons.append("No catalyst")
     if not holding_ok:
         reasons.append({"FADING": "Fading below VWAP", "THIN": "Too few bars"}.get(r.get("setup"), "No bar data"))
     if not liquid_ok:
@@ -497,6 +516,9 @@ def one_loop():
     # News for the strongest candidates (by preliminary setup + gap).
     prelim = sorted(top, key=lambda r: (SETUP_RANK.get(r.get("setup"), 9) >= 7, -r["chg_pct"]))
     for r in prelim[:MAX_NEWS_NAMES]:
+        check_news(r)
+    # Names below VWAP still get their news read when budget allows (cached 20 min).
+    for r in [x for x in top if "catalyst_strength" not in x][:10]:
         check_news(r)
     for r in top:
         r.setdefault("catalyst_strength", "unchecked")
