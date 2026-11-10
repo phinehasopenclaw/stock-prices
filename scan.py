@@ -32,6 +32,8 @@ CT = ZoneInfo("America/Chicago")
 GAP_MIN = float(os.environ.get("GAP_MIN", 5.0))        # % up vs prior close
 PRICE_MIN, PRICE_MAX = 1.0, 100.0
 MCAP_MIN = 50e6
+FLOAT_MIN = 5e6            # shares; below this, spreads gap and stops slip badly
+DOLLAR_VOL_MIN = 3e6       # $ traded today before a name counts as liquid
 AVGVOL_MIN = 150_000
 MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
@@ -60,7 +62,7 @@ WARN_WORDS = {
     "ads ratio": "Reverse split (ADS ratio)", "ratio change": "Reverse split (ADS ratio)",
     "going concern": "Going concern", "delist": "Delisting risk",
     "minimum bid": "Delisting risk", "nasdaq notice": "Delisting risk",
-    "downgrade": "Downgrade", "misses": "Earnings miss", "miss ": "Earnings miss",
+    "downgrade": "Downgrade",
 }
 ROUNDUP = re.compile(
     r"movers|stocks moving|gainers|losers|most active|unusual volume|top stocks|"
@@ -69,6 +71,29 @@ ROUNDUP = re.compile(
     r"stocks making|points;|market update|market wrap|\d+ stocks|top \d+|here are",
     re.I,
 )
+NEG = re.compile(
+    r"\b(lower(s|ed)?|cut(s)?|slash(es|ed)?|downbeat|miss(es|ed)?|disappoint\w*|weak(er)?|"
+    r"fell|falls|plunge\w*|tumble\w*|sink(s)?|decline[sd]?|downgrade[sd]?|suspend\w*|"
+    r"halt(s|ed)? (trial|study|enrollment)|reject\w*|delay(s|ed)?|withdraw\w*|warns?)\b",
+    re.I,
+)
+CAT_TYPES = [
+    ("M&A", r"acqui|merger|buyout|takeover|to be acquired|tender offer"),
+    ("FDA/Clinical", r"\bfda\b|approv|clearance|phase \d|phase [iv]+|\btrial\b|topline|data readout"),
+    ("Earnings", r"earnings|results|revenue|guidance|quarter|\bq[1-4]\b|record sales|eps"),
+    ("Contract", r"contract|award|purchase order|partnership|agreement|collaboration|license"),
+    ("Analyst", r"upgrade|initiat|price target|reiterat|maintains|buy rating|outperform|overweight"),
+]
+CAT_BONUS = {"M&A": 2.5, "FDA/Clinical": 2.5, "Earnings": 2.0, "Contract": 1.5, "Analyst": 0.8, "Other": 0.3}
+
+
+def catalyst_type(text):
+    for name, pat in CAT_TYPES:
+        if re.search(pat, text, re.I):
+            return name
+    return "Other"
+
+
 GENERIC_NAME_WORDS = {"the", "inc", "corp", "corporation", "holdings", "group", "company",
                       "limited", "ltd", "technologies", "international", "global", "systems"}
 
@@ -418,19 +443,34 @@ def check_news(row):
     # Headlines that name the company outrank ones that only mention it in the summary.
     specific.sort(key=lambda n: (not about_company({"headline": n.get("headline", "")}, row),
                                  -n.get("datetime", 0)))
-    cat, warns = None, set()
+    cat, bad, warns = None, None, set()
     for n in specific:
-        text = (n.get("headline", "") + " " + n.get("summary", "")[:300]).lower()
+        head = n.get("headline", "")
+        text = (head + " " + n.get("summary", "")[:300]).lower()
         for w, label in WARN_WORDS.items():
             if w in text:
                 warns.add(label)
-        if cat is None and any(w in text for w in POS_WORDS):
+        if not any(w in text for w in POS_WORDS):
+            continue
+        if NEG.search(head):
+            bad = bad or n          # news exists, but the headline reads bad
+            warns.add("Bad-news headline")
+            row["bad_headline"] = row.get("bad_headline") or head[:160]
+        elif cat is None:
             cat = n
-    if cat is None and specific:
+    if cat is not None:
+        ctype = catalyst_type(cat.get("headline", "") + " " + cat.get("summary", "")[:200])
+        row["catalyst_type"] = ctype
+        row["catalyst_strength"] = "analyst" if ctype == "Analyst" else "strong"
+    elif bad is not None:
+        cat = bad
+        row["catalyst_type"] = catalyst_type(bad.get("headline", ""))
+        row["catalyst_strength"] = "negative"
+        warns.add("Bad-news headline")
+    elif specific:
         cat = specific[0]
+        row["catalyst_type"] = "Other"
         row["catalyst_strength"] = "weak"
-    elif cat is not None:
-        row["catalyst_strength"] = "strong"
     else:
         row["catalyst_strength"] = "none"
     if cat:
@@ -455,27 +495,274 @@ def apply_filter(r):
         rel = r["cum_vol"] / r["avg_vol"]
     r["rel_vol"] = fnum(rel, 2)
     low_float = (r.get("float") or 1e12) < 20e6
-    catalyst_ok = r.get("catalyst_strength") == "strong" or (
-        low_float and (rel or 0) >= 1.0 and r.get("catalyst_strength") != "none")
+    catalyst_ok = r.get("catalyst_strength") in ("strong", "analyst") or (
+        low_float and (rel or 0) >= 1.0 and r.get("catalyst_strength") == "weak")
     squeeze = low_float and (rel or 0) >= 2.0
     holding_ok = r.get("setup") not in ("FADING", "NO DATA", "THIN")
-    liquid_ok = (r.get("mcap") or 0) >= MCAP_MIN or (rel or 0) >= 1.0
+    flt = r.get("float")
+    dollar_vol = (r.get("cum_vol") or 0) * (r.get("price") or 0)
+    r["dollar_vol"] = int(dollar_vol)
+    tiny_float = flt is not None and flt < FLOAT_MIN
+    liquid_ok = (not tiny_float) and dollar_vol >= DOLLAR_VOL_MIN and (
+        (r.get("mcap") or 0) >= MCAP_MIN or (rel or 0) >= 1.0)
     r["filter"] = {"catalyst": bool(catalyst_ok or squeeze), "holding": holding_ok, "liquidity": liquid_ok}
     if squeeze and not catalyst_ok:
         r["catalyst_strength"] = "squeeze"
     reasons = []
     if not r["filter"]["catalyst"]:
-        reasons.append("No catalyst" if r.get("catalyst_strength") != "unchecked" else "News not checked yet")
+        reasons.append({"unchecked": "News not checked yet",
+                        "negative": "Bad-news headline"}.get(r.get("catalyst_strength"), "No catalyst"))
     if not holding_ok:
         reasons.append({"FADING": "Fading below VWAP", "THIN": "Too few bars"}.get(r.get("setup"), "No bar data"))
     if not liquid_ok:
-        reasons.append("Thin / small")
+        reasons.append("Tiny float (<5M sh)" if tiny_float else
+                       "Under $3M traded" if dollar_vol < DOLLAR_VOL_MIN else "Thin / small")
     r["reject"] = reasons
     r["pass"] = not reasons
 
 
+def quality(r):
+    """Within a setup tier: participation first, then catalyst weight, then the latest bar."""
+    q = min(r.get("rel_vol") or 0, 5.0)
+    q += CAT_BONUS.get(r.get("catalyst_type"), 0) if r.get("catalyst_strength") in ("strong", "analyst") else 0
+    q += 1.5 if r.get("catalyst_strength") == "squeeze" else 0
+    q -= 1.5 if r.get("bad_headline") else 0
+    q += min(r.get("vol_surge") or 0, 3.0) * 0.5
+    return round(q, 2)
+
+
 def score(r):
-    return (SETUP_RANK.get(r.get("setup"), 9), -(r.get("rel_vol") or 0), -(r.get("chg_pct") or 0))
+    r["quality"] = quality(r)
+    return (SETUP_RANK.get(r.get("setup"), 9), -r["quality"], -(r.get("chg_pct") or 0))
+
+
+# ---- Float lookup (Finnhub profile, cached for the run) --------------------
+_profile_cache = {}
+
+
+def fill_profile(row):
+    """Yahoo's screener rarely carries float; Finnhub's profile does (in millions)."""
+    sym = row["sym"]
+    if sym not in _profile_cache:
+        prof = {}
+        if FINNHUB_KEY:
+            try:
+                r = requests.get("https://finnhub.io/api/v1/stock/profile2",
+                                 params={"symbol": sym, "token": FINNHUB_KEY}, timeout=15)
+                if r.status_code == 200 and isinstance(r.json(), dict):
+                    prof = r.json()
+            except Exception:
+                pass
+            time.sleep(1.1)
+        _profile_cache[sym] = prof
+    prof = _profile_cache[sym]
+    if not row.get("float") and prof.get("floatingShare"):
+        row["float"] = float(prof["floatingShare"]) * 1e6
+    if not row.get("mcap") and prof.get("marketCapitalization"):
+        row["mcap"] = float(prof["marketCapitalization"]) * 1e6
+
+
+# ---- Signal scoreboard ------------------------------------------------------
+# Every actionable signal (A-TRIGGER, B-BREAKOUT) is logged with its levels and then
+# scored mechanically from 5-minute bars: did price reach the entry, then the target or
+# the stop first? Two exit styles are scored side by side:
+#   full  = all shares out at T1 or the stop
+#   split = half out at T1, stop on the rest moves to breakeven, rest out at T2,
+#           breakeven, or the 14:45 CT time stop
+SIGNAL_SETUPS = ("A-TRIGGER", "B-BREAKOUT")
+FILL_WINDOW_MIN = 30           # a signal that never trades through its entry expires
+TIME_STOP_ET = dt.time(15, 45)  # 14:45 CT
+PRIME_END_CT = dt.time(10, 30)
+_signals = None
+
+
+def load_signals():
+    global _signals
+    if _signals is not None:
+        return _signals
+    _signals = []
+    if REPO:
+        try:
+            h = {"Accept": "application/vnd.github.raw+json"}
+            if TOKEN:
+                h["Authorization"] = f"Bearer {TOKEN}"
+            r = requests.get(f"https://api.github.com/repos/{REPO}/contents/signals.json?ref=scan-data",
+                             headers=h, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                _signals = data if isinstance(data, list) else data.get("signals", [])
+        except Exception as e:
+            _state["errors"].append(f"signal history load failed: {e!r}"[:200])
+    log(f"loaded {len(_signals)} past signals")
+    return _signals
+
+
+def log_new_signals(survivors):
+    sigs = load_signals()
+    now_ct = dt.datetime.now(CT)
+    today = now_ct.date().isoformat()
+    open_today = {(x["sym"], x["setup"]) for x in sigs if x["date"] == today and x["status"] in ("pending", "open")}
+    for r in survivors:
+        if r.get("setup") not in SIGNAL_SETUPS or not r.get("entry") or not r.get("stop"):
+            continue
+        if (r["sym"], r["setup"]) in open_today:
+            continue
+        if r["entry"] <= r["stop"]:
+            continue
+        sigs.append({
+            "id": f"{today}-{r['sym']}-{r['setup']}-{now_ct:%H%M}",
+            "date": today, "time_ct": now_ct.strftime("%H:%M"), "ts": int(time.time()),
+            "sym": r["sym"], "setup": r["setup"],
+            "entry": r["entry"], "stop": r["stop"], "t1": r.get("t1"), "t2": r.get("t2"),
+            "price_at_signal": r.get("price"),
+            "catalyst_type": r.get("catalyst_type"), "catalyst_strength": r.get("catalyst_strength"),
+            "bad_headline": bool(r.get("bad_headline")), "rel_vol": r.get("rel_vol"),
+            "vol_surge": r.get("vol_surge"), "float": r.get("float"),
+            "prime": now_ct.time() < PRIME_END_CT,
+            "status": "pending",
+        })
+        open_today.add((r["sym"], r["setup"]))
+
+
+def _r_mult(sig, price):
+    risk = sig["entry"] - sig["stop"]
+    return round((price - sig["entry"]) / risk, 2) if risk > 0 else 0.0
+
+
+def resolve_signal(sig, df):
+    """Walk 5m bars after the signal. Conservative: if one bar touches both stop and
+    target, the stop is assumed to have hit first."""
+    sig_ts = dt.datetime.fromtimestamp(sig["ts"], ET)
+    bars = df[df.index >= sig_ts - dt.timedelta(minutes=5)]
+    if bars.empty:
+        return
+    entry, stop = sig["entry"], sig["stop"]
+    t1 = sig.get("t1") or entry + 2 * (entry - stop)
+    t2 = sig.get("t2") or entry + 3 * (entry - stop)
+    filled_at = None
+    half_done, rest_stop = False, stop
+    for ts, b in bars.iterrows():
+        hi, lo, cl = float(b["High"]), float(b["Low"]), float(b["Close"])
+        if filled_at is None:
+            if hi >= entry:
+                filled_at = ts
+                sig["status"] = "open"
+                sig["fill_time_ct"] = ts.astimezone(CT).strftime("%H:%M")
+                # The fill bar itself can stop out (entry and stop both inside its range).
+                if lo <= stop:
+                    _close(sig, "loss", stop, stop, ts, half_done=False)
+                    return
+                continue
+            if (ts - sig_ts).total_seconds() > FILL_WINDOW_MIN * 60:
+                sig["status"] = "no_fill"
+                return
+            continue
+        if ts.time() >= TIME_STOP_ET:
+            _close(sig, "time", cl, cl, ts, half_done)
+            return
+        if not half_done:
+            if lo <= stop:
+                _close(sig, "loss", stop, stop, ts, False)
+                return
+            if hi >= t1:
+                half_done = True
+                sig["t1_time_ct"] = ts.astimezone(CT).strftime("%H:%M")
+                rest_stop = entry
+                if hi >= t2:
+                    _close(sig, "win", t1, t2, ts, True)
+                    return
+            continue
+        if lo <= rest_stop:
+            _close(sig, "win", t1, rest_stop, ts, True)
+            return
+        if hi >= t2:
+            _close(sig, "win", t1, t2, ts, True)
+            return
+    # Still running: record a live mark so the page can show it.
+    if filled_at is not None:
+        sig["mark_r"] = _r_mult(sig, float(bars["Close"].iloc[-1]))
+
+
+def _close(sig, status, full_exit, rest_exit, ts, half_done):
+    sig["status"] = status
+    sig["exit_time_ct"] = ts.astimezone(CT).strftime("%H:%M")
+    sig["r_full"] = _r_mult(sig, full_exit)
+    if half_done:
+        sig["r_split"] = round(0.5 * _r_mult(sig, full_exit) + 0.5 * _r_mult(sig, rest_exit), 2)
+    else:
+        sig["r_split"] = sig["r_full"]
+    sig.pop("mark_r", None)
+
+
+def update_signals():
+    sigs = load_signals()
+    today = dt.datetime.now(CT).date().isoformat()
+    live = [x for x in sigs if x["date"] == today and x["status"] in ("pending", "open")]
+    if not live:
+        return
+    syms = sorted({x["sym"] for x in live})
+    try:
+        data = yf.download(syms, period="1d", interval="5m", prepost=False, group_by="ticker",
+                           progress=False, threads=True, auto_adjust=False)
+    except Exception as e:
+        _state["errors"].append(f"signal bars failed: {e!r}"[:200])
+        return
+    for sig in live:
+        try:
+            df = data[sig["sym"]] if len(syms) > 1 else data
+            df = df.dropna(subset=["Close"])
+            if df.index.tz is None:
+                df.index = df.index.tz_localize("UTC")
+            df = df.tz_convert(ET)
+            resolve_signal(sig, df)
+        except Exception as e:
+            sig.setdefault("errors", 0)
+            sig["errors"] += 1
+
+
+def close_stale_signals():
+    """Signals left open from a prior day (job stopped early) are marked unresolved."""
+    today = dt.datetime.now(CT).date().isoformat()
+    for x in load_signals():
+        if x["date"] < today and x["status"] in ("pending", "open"):
+            x["status"] = "unresolved"
+
+
+def signal_stats():
+    done = [x for x in load_signals() if x["status"] in ("win", "loss", "time")]
+
+    def agg(rows):
+        if not rows:
+            return {"n": 0}
+        rf = [x["r_full"] for x in rows]
+        rs = [x["r_split"] for x in rows]
+        return {"n": len(rows), "win_rate": round(sum(1 for r in rf if r > 0) / len(rows), 3),
+                "avg_r_full": round(sum(rf) / len(rows), 2), "avg_r_split": round(sum(rs) / len(rows), 2),
+                "total_r_full": round(sum(rf), 2), "total_r_split": round(sum(rs), 2)}
+
+    clean = lambda x: x.get("catalyst_strength") in ("strong", "squeeze") and not x.get("bad_headline")
+    groups = {
+        "all": done,
+        "A-TRIGGER": [x for x in done if x["setup"] == "A-TRIGGER"],
+        "B-BREAKOUT": [x for x in done if x["setup"] == "B-BREAKOUT"],
+        "prime (before 10:30 CT)": [x for x in done if x.get("prime")],
+        "after 10:30 CT": [x for x in done if not x.get("prime")],
+        "clean catalyst": [x for x in done if clean(x)],
+        "A-TRIGGER + prime + clean": [x for x in done if x["setup"] == "A-TRIGGER" and x.get("prime") and clean(x)],
+    }
+    all_sigs = load_signals()
+    return {
+        "groups": {k: agg(v) for k, v in groups.items()},
+        "days": len({x["date"] for x in all_sigs}),
+        "no_fill": sum(1 for x in all_sigs if x["status"] == "no_fill"),
+        "since": min((x["date"] for x in all_sigs), default=None),
+    }
+
+
+def write_signals():
+    os.makedirs(OUT_DIR, exist_ok=True)
+    with open(os.path.join(OUT_DIR, "signals.json"), "w") as f:
+        json.dump(load_signals(), f, separators=(",", ":"), default=str)
 
 
 # ---- Output ---------------------------------------------------------------
@@ -519,6 +806,8 @@ def one_loop():
     # Names below VWAP still get their news read when budget allows (cached 20 min).
     for r in [x for x in top if "catalyst_strength" not in x][:10]:
         check_news(r)
+    for r in prelim[:MAX_NEWS_NAMES]:
+        fill_profile(r)
     for r in top:
         r.setdefault("catalyst_strength", "unchecked")
         apply_filter(r)
@@ -527,6 +816,18 @@ def one_loop():
     for r in survivors + rejected:
         for k in ("price", "prev_close", "chg_pct"):
             r[k] = fnum(r.get(k), 4 if k != "chg_pct" else 2)
+    try:
+        close_stale_signals()
+        if session == "REGULAR":
+            log_new_signals(survivors)
+        update_signals()
+        write_signals()
+        today = dt.datetime.now(CT).date().isoformat()
+        signals_today = [x for x in load_signals() if x["date"] == today]
+        stats = signal_stats()
+    except Exception as e:
+        _state["errors"].append(f"scoreboard: {e!r}"[:200])
+        signals_today, stats = [], {}
     now = dt.datetime.now(dt.timezone.utc)
     payload = {
         "updated_utc": now.isoformat(timespec="seconds"),
@@ -541,8 +842,10 @@ def one_loop():
         "movers_count": len(movers),
         "survivors": survivors,
         "rejected": [{k: r.get(k) for k in ("sym", "name", "price", "chg_pct", "setup", "reject",
-                                             "catalyst_strength", "rel_vol", "mcap", "ext_pct", "warnings")}
+                                             "catalyst_strength", "catalyst_type", "rel_vol", "mcap", "ext_pct", "warnings")}
                      for r in rejected],
+        "signals_today": signals_today,
+        "signal_stats": stats,
         "errors": _state["errors"],
     }
     publish(payload)
