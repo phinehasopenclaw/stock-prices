@@ -34,7 +34,7 @@ PRICE_MIN, PRICE_MAX = 1.0, 100.0
 MCAP_MIN = 50e6
 AVGVOL_MIN = 150_000
 MAX_BAR_NAMES = 40          # names that get 5m bars each loop
-MAX_NEWS_NAMES = 25         # names that get a Finnhub news check
+MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 120))
 RUN_MINUTES = int(os.environ.get("RUN_MINUTES", 350))
@@ -465,8 +465,7 @@ def apply_filter(r):
         r["catalyst_strength"] = "squeeze"
     reasons = []
     if not r["filter"]["catalyst"]:
-        if r.get("catalyst_strength") != "unchecked":
-            reasons.append("No catalyst")
+        reasons.append("No catalyst" if r.get("catalyst_strength") != "unchecked" else "News not checked yet")
     if not holding_ok:
         reasons.append({"FADING": "Fading below VWAP", "THIN": "Too few bars"}.get(r.get("setup"), "No bar data"))
     if not liquid_ok:
