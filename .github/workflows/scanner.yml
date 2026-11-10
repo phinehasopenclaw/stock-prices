@@ -1,0 +1,34 @@
+name: Gap scanner
+
+# One long-running job per half-day. GitHub's cron is often delayed, so each run
+# loops on its own clock (every ~2 min) instead of relying on frequent schedules.
+on:
+  schedule:
+    - cron: '15 11 * * 1-5'   # 05:15 CT start (runs ~6h)
+    - cron: '0 17 * * 1-5'    # 11:00 CT start (takes over through the close)
+  push:
+    branches: [main]
+    paths: ['scan.py', '.github/workflows/scanner.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: gap-scanner
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q "yfinance>=0.2.54" requests
+      - name: Run scanner loop
+        env:
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scan.py
