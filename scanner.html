@@ -91,6 +91,33 @@ tr:last-child td{border-bottom:0}
 .empty{padding:28px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}
 .err{color:var(--bad);font:12px var(--mono);margin-top:8px}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
+.inbtn{margin-top:2px;align-self:flex-start;background:var(--good-bg);color:var(--good);border-color:var(--good);font-weight:600}
+.inbtn.on{background:var(--panel2);color:var(--muted);border-color:var(--line)}
+.pos{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-width:0}
+.pos .pnl{font:600 20px var(--mono);font-variant-numeric:tabular-nums}
+.pos .pnl small{font-size:12px;color:var(--muted);font-weight:500;margin-left:6px}
+.orders{display:flex;flex-direction:column;gap:6px}
+.order{display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--panel2);border-radius:6px;padding:7px 9px;font:12.5px var(--mono);min-width:0}
+.order b{font-weight:600}
+.order .tag{font:600 10px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.next{font-size:13px;padding:8px 10px;border-radius:6px;background:var(--info-bg);color:var(--fg)}
+.next.go{background:var(--good-bg)}.next.warn{background:var(--bad-bg)}
+.pbtns{display:flex;flex-wrap:wrap;gap:6px}
+.copyrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.copyrow code{font:12px var(--mono);background:var(--panel2);padding:6px 8px;border-radius:6px;white-space:pre-wrap;min-width:0;flex:1}
+.modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.mbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;width:min(420px,100%);display:flex;flex-direction:column;gap:12px}
+.mbox h3{margin:0;font:600 16px var(--sans)}
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mgrid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.mgrid input{font:14px var(--mono);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 8px;width:100%}
+.mnote{font-size:12px;color:var(--muted)}
+.btns{display:flex;gap:8px;justify-content:flex-end}
+button.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+.score .lead{font-size:13px;color:var(--muted);margin:0 0 10px}
+.st{display:inline-block;font:600 11px var(--mono);padding:2px 7px;border-radius:5px}
+.st.win{background:var(--good-bg);color:var(--good)}.st.loss{background:var(--bad-bg);color:var(--bad)}
+.st.open,.st.pending{background:var(--info-bg);color:var(--info)}.st.time,.st.no_fill,.st.unresolved{background:var(--panel2);color:var(--muted)}
 </style>
 </head>
 <body>
@@ -116,14 +143,47 @@ footer{margin-top:24px;color:var(--muted);font-size:12px}
   <div class="err" id="err" hidden></div>
 </header>
 
+<div id="posWrap" hidden>
+<h2>My positions <span class="n" id="posN"></span></h2>
+<div class="grid" id="pos"></div>
+</div>
+<div id="closedWrap" hidden>
+<h2>Closed today <span class="n" id="closedN"></span></h2>
+<div class="tbl"><table>
+  <thead><tr><th>Ticker</th><th>Shares</th><th>Entry</th><th>Avg exit</th><th>P&amp;L</th><th>R</th></tr></thead>
+  <tbody id="closed"></tbody>
+</table></div>
+<div class="copyrow" style="margin-top:8px"><code id="ledgerLines"></code><button type="button" id="copyLedger">Copy for ledger</button></div>
+</div>
+
 <h2>Survivors <span class="n" id="survN"></span></h2>
 <div class="grid" id="cards"><div class="empty">Waiting for the first scan. The scanner runs every ~2 minutes from 5:15 to 15:15 CT on weekdays.</div></div>
+
+<div id="moreWrap" hidden>
+<h2>More survivors <span class="n" id="moreN"></span></h2>
+<div class="tbl"><table>
+  <thead><tr><th>#</th><th>Ticker</th><th>Price</th><th>Chg</th><th>Setup</th><th>Entry</th><th>Stop</th><th>Rel vol</th><th>Catalyst</th></tr></thead>
+  <tbody id="more"></tbody>
+</table></div>
+</div>
 
 <h2>Filtered out <span class="n" id="rejN"></span></h2>
 <div class="tbl"><table>
   <thead><tr><th>Ticker</th><th>Price</th><th>Chg</th><th>Setup</th><th>Rel vol</th><th>Why out</th></tr></thead>
   <tbody id="rej"><tr><td colspan="6">—</td></tr></tbody>
 </table></div>
+
+<h2>Scanner track record</h2>
+<div class="score" id="score"><p class="lead">Every A-TRIGGER and B-BREAKOUT is logged and scored from 5-minute bars: did price trade through the entry, then reach the target or the stop first? Results appear after the first scored signal.</p></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h3 id="mTitle"></h3>
+    <div class="mgrid" id="mBody"></div>
+    <div class="mnote" id="mNote"></div>
+    <div class="btns"><button type="button" id="mCancel">Cancel</button><button type="button" class="primary" id="mOk">Save</button></div>
+  </div>
+</div>
 
 <footer id="foot">Data: Yahoo screener and 5-minute bars via the scanner job; catalysts and live prices from Finnhub. Levels are mechanical reads of the 5-minute chart; confirm on your own chart before entering.</footer>
 </div>
@@ -198,8 +258,10 @@ async function pollLive(){
   const key = store.get("key", "");
   const pill = $("livePill");
   if (!key || !scan) { pill.className = "pill"; $("liveTxt").textContent = key ? "Live quotes ready" : "Live quotes off"; return; }
-  if (scan.session !== "REGULAR") { pill.className = "pill"; $("liveTxt").textContent = "Live quotes start 8:30 CT"; return; }
-  const syms = (scan.survivors || []).slice(0, Math.min(12, +store.get("max", "8") || 8)).map(r => r.sym);
+  const held = Object.keys(positions);
+  if (scan.session !== "REGULAR" && !held.length) { pill.className = "pill"; $("liveTxt").textContent = "Live quotes start 8:30 CT"; return; }
+  const cardSyms = scan.session === "REGULAR" ? (scan.survivors || []).slice(0, Math.min(12, +store.get("max", "8") || 8)).map(r => r.sym) : [];
+  const syms = [...new Set(held.concat(cardSyms))].slice(0, 15);
   let ok = 0;
   await Promise.all(syms.map(async s => {
     try {
@@ -247,7 +309,8 @@ function card(r){
     r.pullback_zone ? `<div class="levels"><div class="lv entry" style="grid-column:span 2"><i>Pullback zone</i><b>${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}</b></div><div class="lv"><i>VWAP</i><b>${fmt(r.vwap)}</b></div><div class="lv"><i>Ext</i><b>${fmt(r.ext_pct,1)}%</b></div></div>` : "";
   const cat = r.catalyst ? `<div class="cat"><a href="${esc(r.catalyst.url)}" target="_blank" rel="noopener">${esc(r.catalyst.headline)}</a> <small>${esc(r.catalyst.source || "")} · ${esc(r.catalyst.time)}</small></div>`
     : `<div class="cat"><small>${r.catalyst_strength === "squeeze" ? "No news. Low-float volume squeeze." : "No company news found."}</small></div>`;
-  const tags = [`<span class="chip cat">Catalyst: ${esc(r.catalyst_strength)}</span>`]
+  const tags = [`<span class="chip cat">${esc(r.catalyst_type ? r.catalyst_type + " · " + r.catalyst_strength : "Catalyst: " + r.catalyst_strength)}</span>`,
+    r.quality != null ? `<span class="chip cat">Rank score ${fmt(r.quality,1)}</span>` : ""]
     .concat((r.warnings || []).map(w => `<span class="chip warnf">${esc(w)}</span>`)).join("");
   return `<article class="card ${esc(r.setup)}" data-sym="${esc(r.sym)}">
     <div class="top"><div style="min-width:0"><div class="sym">${esc(r.sym)}</div><div class="nm">${esc(r.name)}</div></div>
@@ -258,19 +321,32 @@ function card(r){
     ${sparkSVG(r.spark)}
     <div class="stats"><span>VWAP <b>${fmt(r.vwap)}</b></span><span>High <b>${fmt(r.sess_high)}</b></span><span>PM <b>${fmt(r.pm_low)}–${fmt(r.pm_high)}</b></span>
       <span>Rel vol <b>${fmt(r.rel_vol,1)}x</b></span><span>Surge <b>${fmt(r.vol_surge,1)}x</b></span><span>Float <b>${fmtBig(r.float)}</b></span><span>Cap <b>${fmtBig(r.mcap)}</b></span></div>
-    ${cat}<div class="tags">${tags}</div>
+    ${cat}${r.bad_headline ? `<div class="cat"><small class="dn">Also in the news: ${esc(r.bad_headline)}</small></div>` : ""}<div class="tags">${tags}</div>
+    ${positions[r.sym] ? `<button type="button" class="inbtn on" data-goto="${esc(r.sym)}">Tracking above</button>` : `<button type="button" class="inbtn" data-in="${esc(r.sym)}">I'm in</button>`}
   </article>`;
 }
 function render(){
   if (!scan) return;
   const max = +store.get("max", "8") || 8, surv = scan.survivors || [], rej = scan.rejected || [];
+  renderPositions();
+  renderScore();
   $("survN").textContent = `· ${surv.length}`;
   $("rejN").textContent = `· ${rej.length}`;
+  const extra = surv.slice(max);
+  $("moreWrap").hidden = !extra.length;
+  $("moreN").textContent = `· ${extra.length}`;
+  $("more").innerHTML = extra.map((r, i) => {
+    const L = live[r.sym], p = L ? L.p : r.price, c = r.prev_close ? (p / r.prev_close - 1) * 100 : r.chg_pct;
+    return `<tr><td>${max + i + 1}</td><td><b>${esc(r.sym)}</b></td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
+      <td class="${c >= 0 ? "up" : "dn"}">${c >= 0 ? "+" : ""}${fmt(c,1)}%</td><td><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span></td>
+      <td>${fmt(r.entry)}</td><td>${fmt(r.stop)}</td><td>${fmt(r.rel_vol,1)}x</td>
+      <td>${esc(r.catalyst_type || r.catalyst_strength || "")}${r.bad_headline ? " · ⚠ bad news" : ""}</td></tr>`;
+  }).join("");
   $("cards").innerHTML = surv.length ? surv.slice(0, max).map(card).join("")
     : `<div class="empty">No names pass all three checks right now (catalyst, holding above VWAP, liquidity). ${scan.movers_count || 0} stocks are up ${scan.params?.gap_min ?? 5}%+. Waiting is a position.</div>`;
   $("rej").innerHTML = rej.length ? rej.slice(0, 40).map(r => `<tr><td><b>${esc(r.sym)}</b></td><td>${fmt(r.price)}</td>
       <td class="${(r.chg_pct||0) >= 0 ? "up" : "dn"}">${fmt(r.chg_pct,1)}%</td><td>${esc(r.setup || "—")}</td><td>${fmt(r.rel_vol,1)}x</td>
-      <td>${esc((r.reject || []).join(", "))}${(r.warnings||[]).length ? " · ⚠ " + esc(r.warnings.join(", ")) : ""}</td></tr>`).join("")
+      <td>${esc((r.reject || []).join(", "))}${r.catalyst_type ? " · " + esc(r.catalyst_type) : ""}${(r.warnings||[]).length ? " · ⚠ " + esc(r.warnings.join(", ")) : ""}</td></tr>`).join("")
     : `<tr><td colspan="6">None</td></tr>`;
   const sessMap = { PRE: "Pre-market", REGULAR: "Market open", POST: "After hours", CLOSED: "Closed" };
   $("sess").textContent = sessMap[scan.session] || scan.session;
@@ -293,6 +369,163 @@ function tick(){
   else if (wd && mins < 510 && mins >= 300) { ho.hidden = false; ho.textContent = `Pre-market: build the list, set alerts at VWAP and the highs. Bell in ${Math.floor((510 - mins) / 60)}h ${(510 - mins) % 60}m.`; }
   else ho.hidden = true;
 }
+// ---- positions ("I'm in" mode). Stored in this browser only.
+const todayCT = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+const mmdd = () => { const [y, m, d] = todayCT().split("-"); return `${+m}/${+d}`; };
+function loadJSON(k, d){ try { return JSON.parse(store.get(k, "")) || d; } catch(e){ return d; } }
+let positions = loadJSON("pos", {});
+let closedToday = loadJSON("closed_" + todayCT(), []);
+const savePos = () => { store.set("pos", JSON.stringify(positions)); store.set("closed_" + todayCT(), JSON.stringify(closedToday)); };
+const rowFor = sym => (scan?.survivors || []).find(r => r.sym === sym) || (scan?.rejected || []).find(r => r.sym === sym);
+const r2 = x => Math.round(x * 100) / 100;
+const stopLimit = (stop) => r2(stop * (stop < 5 ? 0.98 : 0.99));   // room so the stop-limit can fill in a fast drop
+const fmtUSD = x => (x >= 0 ? "+$" : "−$") + Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+let modalCb = null;
+function openModal(title, fields, note, okText, cb){
+  $("mTitle").textContent = title;
+  $("mBody").innerHTML = fields.map(f => `<label for="mf-${f.k}">${esc(f.label)}<input id="mf-${f.k}" inputmode="decimal" value="${f.v ?? ""}"></label>`).join("");
+  $("mNote").textContent = note || "";
+  $("mOk").textContent = okText || "Save";
+  modalCb = () => { const out = {}; for (const f of fields) out[f.k] = parseFloat($("mf-" + f.k).value.replace(/[$,]/g, "")); cb(out); };
+  $("modal").hidden = false;
+  setTimeout(() => $("mf-" + fields[0].k)?.focus(), 30);
+}
+$("mCancel").onclick = () => { $("modal").hidden = true; modalCb = null; };
+$("mOk").onclick = () => { if (modalCb) modalCb(); $("modal").hidden = true; modalCb = null; render(); };
+document.addEventListener("keydown", e => { if (!$("modal").hidden && e.key === "Escape") $("mCancel").click(); if (!$("modal").hidden && e.key === "Enter") $("mOk").click(); });
+
+function openIn(sym){
+  const r = rowFor(sym) || { sym, price: live[sym]?.p };
+  const risk = +store.get("risk", "200") || 200;
+  const entry = r.entry || r.price, stop = r.stop || r2(entry * 0.97), R = entry - stop;
+  openModal(`I'm in ${sym}`, [
+    { k: "entry", label: "Fill price", v: fmt(entry, entry < 10 ? 3 : 2) },
+    { k: "shares", label: "Shares", v: R > 0 ? Math.floor(risk / R) : "" },
+    { k: "stop", label: "Stop", v: fmt(stop) },
+    { k: "t1", label: "Target 1 (half)", v: fmt(r.t1 || entry + 2 * R) },
+    { k: "t2", label: "Target 2 (rest)", v: fmt(r.t2 || entry + 3 * R) },
+  ], "Defaults come from the card. Change them to your actual fill. The plan splits the position: half carries the stop, half carries the T1 limit.", "Start tracking", v => {
+    if (!(v.entry > 0 && v.shares > 0 && v.stop > 0 && v.stop < v.entry)) return;
+    positions[sym] = { sym, name: r.name || sym, entry: v.entry, shares: Math.round(v.shares), stop: v.stop, stop0: v.stop,
+      t1: v.t1 > v.entry ? v.t1 : r2(v.entry + 2 * (v.entry - v.stop)), t2: v.t2 > v.entry ? v.t2 : r2(v.entry + 3 * (v.entry - v.stop)),
+      opened: Date.now(), half: false, sold: 0, realized: 0, exits: [], last: r.price || v.entry };
+    savePos();
+  });
+}
+function recordExit(p, shares, price){
+  shares = Math.min(shares, p.shares - p.sold);
+  p.realized += (price - p.entry) * shares; p.sold += shares; p.exits.push({ shares, price });
+}
+function finish(sym){
+  const p = positions[sym];
+  const R = p.entry - p.stop0, avgOut = p.exits.reduce((s, e) => s + e.shares * e.price, 0) / Math.max(1, p.sold);
+  closedToday.push({ sym, shares: p.shares, entry: p.entry, avgOut, pnl: p.realized, r: R > 0 ? p.realized / (R * p.shares) : 0, exits: p.exits });
+  delete positions[sym]; savePos();
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.in) openIn(b.dataset.in);
+  if (b.dataset.goto) $("posWrap").scrollIntoView({ behavior: "smooth" });
+  const sym = b.dataset.sym, p = sym && positions[sym]; if (!p) return;
+  const open = p.shares - p.sold, px = p.last;
+  if (b.dataset.act === "t1") openModal(`${sym}: T1 half filled`, [
+      { k: "price", label: "Fill price", v: fmt(p.t1) }, { k: "shares", label: "Shares sold", v: p.shares - Math.ceil(p.shares / 2) }],
+      "Next: move the stop on the remaining shares to your entry (breakeven).", "Record", v => {
+        if (v.price > 0 && v.shares > 0) { recordExit(p, v.shares, v.price); p.half = true; p.stop = Math.max(p.stop, p.entry); savePos(); } });
+  if (b.dataset.act === "stop") openModal(`${sym}: move stop`, [{ k: "stop", label: "New stop", v: fmt(p.stop) }],
+      "Log the stop you actually have working, so alerts and the plan stay in sync.", "Update", v => { if (v.stop > 0) { p.stop = v.stop; savePos(); } });
+  if (b.dataset.act === "exit") openModal(`${sym}: exit`, [{ k: "price", label: "Exit price", v: fmt(px, px < 10 ? 3 : 2) }, { k: "shares", label: "Shares", v: open }],
+      "", "Record exit", v => { if (v.price > 0 && v.shares > 0) { recordExit(p, v.shares, v.price); if (p.sold >= p.shares) finish(sym); else savePos(); } });
+  if (b.dataset.act === "drop") { delete positions[sym]; savePos(); render(); }
+});
+
+function posCard(p){
+  const row = rowFor(p.sym), L = live[p.sym];
+  const price = L ? L.p : (row?.price ?? p.last); p.last = price;
+  const R = p.entry - p.stop0, open = p.shares - p.sold;
+  const total = p.realized + (price - p.entry) * open, rNow = R > 0 ? total / (R * p.shares) : 0;
+  const plus1R = r2(p.entry + R);
+  const stopHalf = Math.ceil(p.shares / 2), tgtHalf = p.shares - stopHalf;
+  const trail = row?.ema9 ? r2(Math.max(p.entry, row.ema9 * 0.995)) : p.entry;
+  const ct = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })), mins = ct.getHours() * 60 + ct.getMinutes();
+  let orders, next, cls = "";
+  if (!p.half) {
+    const beNow = price >= plus1R && p.stop < p.entry;
+    orders = [
+      [`STOP-LIMIT SELL <b>${stopHalf}</b> @ ${fmt(p.stop)} · limit ${fmt(stopLimit(p.stop))}`, "Protects half"],
+      [`LIMIT SELL <b>${tgtHalf}</b> @ ${fmt(p.t1)}`, "Target half"],
+    ];
+    if (price <= p.stop * 1.003) { next = `At the stop. If the stop half filled, sell the other ${tgtHalf} now: cancel the T1 limit and sell with a limit at the bid.`; cls = "warn";
+      alertOnce(p.sym + "|stop|" + p.stop, `${p.sym} at stop ${fmt(p.stop)}`, "Sell the target half too."); }
+    else if (price >= p.t1) { next = `T1 reached. Confirm the ${tgtHalf}-share limit filled, then tap "T1 half filled".`; cls = "go";
+      alertOnce(p.sym + "|t1", `${p.sym} hit T1 ${fmt(p.t1)}`, "Confirm the half filled, then raise the stop to breakeven."); }
+    else if (beNow) { next = `Up 1R. Move the stop half to breakeven: replace the stop with ${fmt(p.entry)}.`; cls = "go";
+      alertOnce(p.sym + "|1r", `${p.sym} +1R at ${fmt(plus1R)}`, `Move the stop to breakeven ${fmt(p.entry)}.`); }
+    else next = `Hold. Next action at ${fmt(plus1R)} (+1R): stop to breakeven. Target ${fmt(p.t1)}.`;
+  } else {
+    orders = [
+      [`STOP-LIMIT SELL <b>${open}</b> @ ${fmt(Math.max(p.stop, p.entry))} · limit ${fmt(stopLimit(Math.max(p.stop, p.entry)))}`, "Protects the rest"],
+      [`LIMIT SELL <b>${open}</b> @ ${fmt(p.t2)}`, "Only one of these can sit on the same shares; keep the stop, watch for T2"],
+    ];
+    if (price >= p.t2) { next = `T2 reached. Sell the remaining ${open}.`; cls = "go"; alertOnce(p.sym + "|t2", `${p.sym} hit T2 ${fmt(p.t2)}`, `Sell the remaining ${open}.`); }
+    else if (trail > p.stop + 0.01) { next = `Trail: raise the stop to ${fmt(trail)} (just under the 9 EMA). Never lower it.`; cls = "go"; }
+    else next = `Free trade: stop at breakeven or better. Let it work toward ${fmt(p.t2)}.`;
+  }
+  if (mins >= 885 && mins < 900) { next = "14:45 CT: decide now. Flat for the day, or a stop-limit that stays working overnight."; cls = "warn";
+    alertOnce(p.sym + "|time|" + todayCT(), `${p.sym}: 14:45 time check`, "Close or set an overnight stop."); }
+  return `<article class="pos">
+    <div class="top"><div style="min-width:0"><div class="sym">${esc(p.sym)}</div><div class="nm">${p.shares.toLocaleString()} sh @ ${fmt(p.entry, p.entry < 10 ? 3 : 2)} · stop ${fmt(p.stop)}${p.half ? " · half sold" : ""}</div></div>
+      <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div>${L ? `<div class="live">LIVE</div>` : `<div class="live" style="color:var(--muted)">SCAN PRICE</div>`}</div></div>
+    <div class="pnl ${total >= 0 ? "up" : "dn"}">${fmtUSD(total)}<small>${rNow >= 0 ? "+" : ""}${fmt(rNow, 2)}R</small></div>
+    <div class="orders">${orders.map(([t, tag]) => `<div class="order"><span>${t}</span><span class="tag">${esc(tag)}</span></div>`).join("")}</div>
+    <div class="next ${cls}">${next}</div>
+    <div class="levels"><div class="lv"><i>+1R</i><b>${fmt(plus1R)}</b></div><div class="lv"><i>T1</i><b>${fmt(p.t1)}</b></div><div class="lv"><i>T2</i><b>${fmt(p.t2)}</b></div><div class="lv"><i>VWAP</i><b>${fmt(row?.vwap)}</b></div></div>
+    <div class="pbtns">${p.half ? "" : `<button type="button" data-sym="${esc(p.sym)}" data-act="t1">T1 half filled</button>`}
+      <button type="button" data-sym="${esc(p.sym)}" data-act="stop">Moved stop</button>
+      <button type="button" data-sym="${esc(p.sym)}" data-act="exit">Exit</button>
+      <button type="button" data-sym="${esc(p.sym)}" data-act="drop">Remove</button></div>
+  </article>`;
+}
+function renderPositions(){
+  const ps = Object.values(positions);
+  $("posWrap").hidden = !ps.length;
+  $("posN").textContent = `· ${ps.length}`;
+  $("pos").innerHTML = ps.map(posCard).join("");
+  $("closedWrap").hidden = !closedToday.length;
+  const tot = closedToday.reduce((s, c) => s + c.pnl, 0);
+  $("closedN").textContent = closedToday.length ? `· ${fmtUSD(tot)}` : "";
+  $("closed").innerHTML = closedToday.map(c => `<tr><td><b>${esc(c.sym)}</b></td><td>${c.shares.toLocaleString()}</td><td>${fmt(c.entry, 3)}</td><td>${fmt(c.avgOut, 3)}</td>
+    <td class="${c.pnl >= 0 ? "up" : "dn"}">${fmtUSD(c.pnl)}</td><td>${fmt(c.r, 2)}R</td></tr>`).join("");
+  $("ledgerLines").textContent = closedToday.flatMap(c => [`BUY ${c.shares} ${c.sym} @ ${c.entry} ${mmdd()}`].concat(c.exits.map(x => `SELL ${x.shares} ${c.sym} @ ${x.price} ${mmdd()}`))).join("\n");
+}
+$("copyLedger").onclick = async () => {
+  try { await navigator.clipboard.writeText($("ledgerLines").textContent); $("copyLedger").textContent = "Copied"; }
+  catch(e){ const rg = document.createRange(); rg.selectNodeContents($("ledgerLines")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); $("copyLedger").textContent = "Selected: press Ctrl+C"; }
+  setTimeout(() => $("copyLedger").textContent = "Copy for ledger", 2500);
+};
+
+// ---- scanner track record
+function renderScore(){
+  const st = scan?.signal_stats, today = scan?.signals_today || [];
+  if (!st || !st.groups) return;
+  const risk = +store.get("risk", "200") || 200, g = st.groups, all = g.all || { n: 0 };
+  const pct = x => x == null ? "—" : Math.round(x * 100) + "%";
+  const rows = Object.entries(g).filter(([, v]) => v.n).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.n}</td><td>${pct(v.win_rate)}</td>
+      <td class="${v.avg_r_full >= 0 ? "up" : "dn"}">${fmt(v.avg_r_full, 2)}R</td><td class="${v.avg_r_split >= 0 ? "up" : "dn"}">${fmt(v.avg_r_split, 2)}R</td>
+      <td class="${v.avg_r_split >= 0 ? "up" : "dn"}">${fmtUSD(v.avg_r_split * risk)}</td></tr>`).join("");
+  const tRows = today.map(x => {
+    const r = x.r_split ?? x.mark_r;
+    return `<tr><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b></td><td>${esc(x.setup)}</td><td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(x.t1)}</td>
+      <td><span class="st ${esc(x.status)}">${esc(x.status.replace("_", " "))}</span></td><td>${r == null ? "—" : fmt(r, 2) + "R"}</td>
+      <td>${x.prime ? "prime" : "midday"}${x.bad_headline ? " · ⚠" : ""}</td></tr>`;
+  }).join("");
+  $("score").innerHTML = `<p class="lead">${all.n} scored signal${all.n === 1 ? "" : "s"} over ${st.days || 0} trading day${st.days === 1 ? "" : "s"}${st.since ? " since " + esc(st.since) : ""}${st.no_fill ? ` · ${st.no_fill} never traded through entry` : ""}.
+      Scored mechanically from 5-minute bars, before slippage. Dollar column = average R × your $${risk} risk. Treat it as noise until there are 30+ signals.</p>
+    ${rows ? `<div class="tbl"><table><thead><tr><th>Group</th><th>Signals</th><th>Win</th><th>Avg R, all at T1</th><th>Avg R, split exit</th><th>$/trade</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+    ${tRows ? `<h2 style="margin-top:16px">Today's signals</h2><div class="tbl"><table><thead><tr><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry</th><th>Stop</th><th>T1</th><th>Status</th><th>R</th><th>When</th></tr></thead><tbody>${tRows}</tbody></table></div>` : ""}`;
+}
+
 loadScan();
 setInterval(loadScan, 75000);
 setInterval(pollLive, 20000);
