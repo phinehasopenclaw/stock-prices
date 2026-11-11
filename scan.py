@@ -289,12 +289,14 @@ def analyze_bars(df, row, session):
     open_t = dt.time(9, 30)
     pre = df[[x < open_t for x in t]]
     reg = df[[x >= open_t for x in t]]
-    sess = reg if (session == "REGULAR" or len(reg)) else pre
+    sess = reg if len(reg) >= 3 else (df if len(reg) else pre)
     if sess.empty:
         sess = df
 
     tp = (sess["High"] + sess["Low"] + sess["Close"]) / 3
     v = sess["Volume"].fillna(0)
+    if v.sum() <= 0:  # Yahoo pre-market bars carry no volume: use a time-weighted average
+        v = v * 0 + 1
     vwap_series = (tp * v).cumsum() / v.cumsum().replace(0, float("nan"))
     vwap = fnum(vwap_series.iloc[-1], 4)
     closes = list(df["Close"])
