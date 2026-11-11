@@ -35,6 +35,10 @@ MCAP_MIN = 50e6
 FLOAT_MIN = 5e6            # shares; below this, spreads gap and stops slip badly
 DOLLAR_VOL_MIN = 3e6       # $ traded today before a name counts as liquid
 AVGVOL_MIN = 150_000
+SURGE_MIN = 1.5            # completed-bar volume vs baseline for A-TRIGGER / B-BREAKOUT
+IGNITION_PACE = 3.0        # forming-bar volume pace vs baseline for IGNITION
+ORB_START_CT, ORB_END_CT = dt.time(8, 35), dt.time(9, 30)
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
@@ -321,24 +325,41 @@ def analyze_bars(df, row, session):
         row["setup_note"] = "Too few bars to read yet."
         return
 
-    # Completed bars: drop the forming bar if it started < 5 minutes ago.
+    # Completed bars vs. the bar still forming. The forming bar is judged by its volume
+    # PACE (volume so far scaled to 5 minutes) so a surge is seen while it happens,
+    # not 5-7 minutes later when the bar closes.
     now = dt.datetime.now(ET)
-    bars = sess
-    if (now - bars.index[-1].to_pydatetime()).total_seconds() < 300 and len(bars) > 3:
+    now_ct = now.astimezone(CT)
+    bars, forming, f_elapsed = sess, None, 0.0
+    age = (now - bars.index[-1].to_pydatetime()).total_seconds()
+    if age < 300 and len(bars) > 3:
+        forming, f_elapsed = bars.iloc[-1], max(age, 1.0)
         bars = bars.iloc[:-1]
     o, h, l, c, vol = (list(bars[k]) for k in ("Open", "High", "Low", "Close", "Volume"))
     vol = [x if x == x else 0 for x in vol]
     last = len(c) - 1
-    prior = vol[max(0, last - 6):last]
-    avg_prior = (sum(prior) / len(prior)) if prior else 0
+    reg_mode = len(reg) >= 3
+    # Baseline = prior 6 completed bars. Once the session has some history, the first two
+    # regular-session bars (the opening rush) are left out so they don't bury later surges.
+    base_idx = list(range(max(0, last - 6), last))
+    if reg_mode and last >= 5:
+        base_idx = [i for i in base_idx if i >= 2]
+    base = [vol[i] for i in base_idx]
+    avg_prior = (sum(base) / len(base)) if base else 0
     surge = (vol[last] / avg_prior) if avg_prior else None
+    pace = None
+    if forming is not None and avg_prior and f_elapsed >= 60:
+        fv = float(forming["Volume"]) if forming["Volume"] == forming["Volume"] else 0.0
+        pace = fv * (300.0 / f_elapsed) / avg_prior
     green = c[last] > o[last]
     ext = (price - vwap) / vwap * 100
     support = max(vwap, ema9 or vwap)
     recent_low = min(l[max(0, last - 5):last + 1])
     pulled_back = sess_high > price * 1.025 and recent_low <= support * 1.015
-    trigger = green and surge is not None and surge >= 1.5 and last >= 1 and c[last] > h[last - 1]
+    trigger = green and surge is not None and surge >= SURGE_MIN and last >= 1 and c[last] > h[last - 1]
     near_high = price >= sess_high * 0.985
+    late = now_ct.time() >= PRIME_END_CT
+    row["late"] = late
 
     # Red-volume dry-up during the pullback vs. the run.
     reds = [vol[i] for i in range(max(0, last - 6), last) if c[i] < o[i]]
@@ -346,6 +367,7 @@ def analyze_bars(df, row, session):
     drying = bool(reds and greens and (sum(reds) / len(reds)) < 0.6 * (max(greens)))
 
     row["vol_surge"] = fnum(surge, 2)
+    row["vol_pace"] = fnum(pace, 2)
     row["ext_pct"] = fnum(ext, 2)
     row["red_vol_drying"] = drying
     row["spark"] = {
@@ -354,40 +376,94 @@ def analyze_bars(df, row, session):
         "vwap": [fnum(x, 4) for x in list(vwap_series)[-40:]],
     }
 
-    def lv(entry, stop, t1, t2=None):
+    def lv(entry, stop, t1=None, t2=None):
+        """Levels with a hard floor: T1 is never closer than 2R, T2 never closer than 3R."""
         entry, stop = round(entry, 2), round(stop, 2)
         risk = entry - stop
         row["entry"], row["stop"] = entry, stop
-        row["t1"] = round(t1, 2)
-        row["t2"] = round(t2, 2) if t2 else round(entry + 2 * risk, 2)
+        row["t1"] = round(max(t1 or 0, entry + 2 * risk), 2)
+        row["t2"] = round(max(t2 or 0, entry + 3 * risk, row["t1"]), 2)
         row["risk_pct"] = fnum(risk / entry * 100, 1) if entry else None
+        row["room_r"] = fnum((sess_high - entry) / risk, 2) if risk > 0 else None
+
+    def late_note():
+        return " Late session (after 10:30 CT): half size or skip." if late else ""
+
+    # ---- Opening-range breakout (Rule 8), 8:35-9:30 CT ----------------------------
+    first = reg.iloc[0] if len(reg) else None
+    first_done = first is not None and (now - reg.index[0].to_pydatetime()).total_seconds() >= 300
+    if first_done:
+        row["rule8"] = bool(first["Close"] > first["Open"])
+    if (first_done and row["rule8"] and ORB_START_CT <= now_ct.time() < ORB_END_CT
+            and price >= float(first["Low"])):
+        o_hi, o_lo = float(first["High"]), float(first["Low"])
+        entry, stop = o_hi + 0.01, o_lo - 0.01
+        risk = entry - stop
+        if risk > 0 and risk / entry <= 0.08:
+            if price < entry:
+                row["setup"] = "ORB-WATCH"
+                row["setup_note"] = (f"First 5-min candle closed green (Rule 8 passed). "
+                                     f"Buy the break of its high {o_hi:.2f}; stop under its low {o_lo:.2f}.")
+                lv(entry, stop)
+                return
+            if price <= entry + risk and price > vwap:
+                row["setup"] = "ORB-TRIGGER"
+                row["setup_note"] = (f"Broke the opening-candle high {o_hi:.2f}"
+                                     + (f" on {pace:.1f}x volume pace" if pace else "")
+                                     + f". Stop under the candle low {o_lo:.2f}.")
+                lv(entry, stop)
+                return
+            # Already more than 1R past the break: fall through (usually EXTENDED).
 
     if price < vwap:
         row["setup"] = "FADING"
         row["setup_note"] = f"Below VWAP {vwap:.2f}. Only a VWAP reclaim on volume re-opens it."
         row["reclaim"] = round(vwap, 2)
-    elif ext > 8:
+        return
+
+    # ---- Ignition: the bar forming right now is a volume burst breaking out ---------
+    if forming is not None and pace is not None and pace >= IGNITION_PACE and ext <= 8:
+        f_o, f_h, f_l = float(forming["Open"]), float(forming["High"]), float(forming["Low"])
+        f_rng = f_h - f_l
+        prior_hi = max(h[max(0, last - 5):last + 1])
+        if (price > f_o and f_rng > 0 and (price - f_l) / f_rng >= 0.6 and price >= prior_hi):
+            stop = min(f_l, l[last]) - 0.01
+            if (price + 0.01 - stop) / price <= 0.08:
+                row["setup"] = "IGNITION"
+                row["setup_note"] = (f"Volume burst NOW: this bar is trading at {pace:.1f}x normal pace, "
+                                     f"breaking {prior_hi:.2f} above VWAP {vwap:.2f}. Limit at the ask; stop under the bar low."
+                                     + late_note())
+                lv(price + 0.01, stop)
+                return
+
+    if ext > 8:
         row["setup"] = "EXTENDED"
         row["setup_note"] = f"{ext:.1f}% above VWAP. No entry; wait for a pullback toward {support:.2f}."
         row["pullback_zone"] = [round(support, 2), round(support * 1.015, 2)]
     elif pulled_back and trigger:
-        row["setup"] = "A-TRIGGER"
-        row["setup_note"] = (f"Pulled back to VWAP/EMA9 and printed a green bar on {surge:.1f}x volume."
-                             + (" Red volume dried up." if drying else ""))
-        lv(h[last] + 0.01, recent_low * 0.995, sess_high, sess_high + (sess_high - recent_low) * 0.5)
+        lv(h[last] + 0.01, recent_low * 0.995, sess_high)
+        if (row.get("room_r") or 0) >= 2:
+            row["setup"] = "A-TRIGGER"
+            row["setup_note"] = (f"Pulled back to VWAP/EMA9 and printed a green bar on {surge:.1f}x volume."
+                                 + (" Red volume dried up." if drying else "") + late_note())
+        else:
+            row["setup"] = "A-WATCH"
+            row["setup_note"] = (f"Green bar on {surge:.1f}x volume, but the high {sess_high:.2f} is under 2R away. "
+                                 "Skip unless it clears the high.")
     elif pulled_back:
         row["setup"] = "A-WATCH"
         row["setup_note"] = (f"Holding support near {support:.2f}. Wait for a green bar on volume."
                              + (" Red volume drying up." if drying else " Red volume still heavy."))
         lv(h[last] + 0.01, recent_low * 0.995, sess_high)
-    elif near_high and (surge or 0) >= 2:
+    elif near_high and max(surge or 0, (pace or 0) / 1.5) >= SURGE_MIN:
         row["setup"] = "B-BREAKOUT"
-        row["setup_note"] = f"Pressing the high {sess_high:.2f} on {surge:.1f}x volume. Half size."
-        lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995, sess_high * 1.05)
+        vtxt = f"{surge:.1f}x volume" if (surge or 0) >= SURGE_MIN else f"{pace:.1f}x volume pace"
+        row["setup_note"] = f"Pressing the high {sess_high:.2f} on {vtxt}. Half size." + late_note()
+        lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995)
     elif near_high:
         row["setup"] = "B-WATCH"
         row["setup_note"] = f"At the high {sess_high:.2f} without a volume surge yet."
-        lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995, sess_high * 1.05)
+        lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995)
     else:
         row["setup"] = "HOLDING"
         row["setup_note"] = "Above VWAP, between support and the high. No trigger."
@@ -487,7 +563,7 @@ def check_news(row):
 
 
 # ---- Filter & rank --------------------------------------------------------
-SETUP_RANK = {"A-TRIGGER": 0, "A-WATCH": 1, "B-BREAKOUT": 2, "B-WATCH": 3,
+SETUP_RANK = {"IGNITION": 0, "ORB-TRIGGER": 0, "A-TRIGGER": 0, "ORB-WATCH": 1, "A-WATCH": 1, "B-BREAKOUT": 2, "B-WATCH": 3,
               "HOLDING": 4, "EXTENDED": 5, "THIN": 6, "FADING": 7, "NO DATA": 8}
 
 
@@ -571,7 +647,8 @@ def fill_profile(row):
 #   full  = all shares out at T1 or the stop
 #   split = half out at T1, stop on the rest moves to breakeven, rest out at T2,
 #           breakeven, or the 14:45 CT time stop
-SIGNAL_SETUPS = ("A-TRIGGER", "B-BREAKOUT")
+SIGNAL_SETUPS = ("IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT")
+RESIGNAL_MIN = 20             # same name + setup can signal again after this many minutes
 FILL_WINDOW_MIN = 30           # a signal that never trades through its entry expires
 TIME_STOP_ET = dt.time(15, 45)  # 14:45 CT
 PRIME_END_CT = dt.time(10, 30)
@@ -603,15 +680,19 @@ def log_new_signals(survivors):
     sigs = load_signals()
     now_ct = dt.datetime.now(CT)
     today = now_ct.date().isoformat()
-    open_today = {(x["sym"], x["setup"]) for x in sigs if x["date"] == today and x["status"] in ("pending", "open")}
+    cutoff = time.time() - RESIGNAL_MIN * 60
+    recent = {(x["sym"], x["setup"]) for x in sigs if x["date"] == today and x.get("ts", 0) >= cutoff}
+    orb_today = {(x["sym"], x["setup"]) for x in sigs if x["date"] == today and x["setup"] == "ORB-TRIGGER"}
     for r in survivors:
         if r.get("setup") not in SIGNAL_SETUPS or not r.get("entry") or not r.get("stop"):
             continue
-        if (r["sym"], r["setup"]) in open_today:
+        if (r["sym"], r["setup"]) in recent:
             continue
+        if r["setup"] == "ORB-TRIGGER" and (r["sym"], "ORB-TRIGGER") in orb_today:
+            continue  # one opening-range break per name per day
         if r["entry"] <= r["stop"]:
             continue
-        sigs.append({
+        sig = {
             "id": f"{today}-{r['sym']}-{r['setup']}-{now_ct:%H%M}",
             "date": today, "time_ct": now_ct.strftime("%H:%M"), "ts": int(time.time()),
             "sym": r["sym"], "setup": r["setup"],
@@ -621,9 +702,37 @@ def log_new_signals(survivors):
             "bad_headline": bool(r.get("bad_headline")), "rel_vol": r.get("rel_vol"),
             "vol_surge": r.get("vol_surge"), "float": r.get("float"),
             "prime": now_ct.time() < PRIME_END_CT,
+            "vol_pace": r.get("vol_pace"), "room_r": r.get("room_r"),
             "status": "pending",
+        }
+        sigs.append(sig)
+        recent.add((r["sym"], r["setup"]))
+        if r["setup"] == "ORB-TRIGGER":
+            orb_today.add((r["sym"], "ORB-TRIGGER"))
+        push_signal(sig, r)
+
+
+def push_signal(sig, r):
+    """Phone push through ntfy.sh. The topic name lives in the NTFY_TOPIC repo secret."""
+    if not NTFY_TOPIC or not sig.get("prime"):
+        return  # after 10:30 CT signals are logged for the record but not pushed (replay: -0.27R avg)
+    risk = sig["entry"] - sig["stop"]
+    late = not sig.get("prime")
+    title = f"{'LATE ' if late else ''}{sig['sym']} {sig['setup']} {sig['time_ct']} CT"
+    cat = f"{r.get('catalyst_type') or 'no type'} ({r.get('catalyst_strength')})"
+    body = (f"Entry >= {sig['entry']:.2f} | stop {sig['stop']:.2f} | T1 {sig['t1']:.2f} (2R) | "
+            f"risk {risk / sig['entry'] * 100:.1f}%\n{r.get('setup_note') or ''}\nCatalyst: {cat}"
+            + ("\nBAD-NEWS HEADLINE" if r.get("bad_headline") else "")
+            + ("".join(f"\nWarning: {w}" for w in (r.get("warnings") or []))))
+    try:
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=body.encode("utf-8"), timeout=10, headers={
+            "Title": title.encode("ascii", "ignore").decode(),
+            "Priority": "3" if late else "5",
+            "Tags": "warning" if late or r.get("bad_headline") else "rocket",
+            "Click": f"https://{REPO.split('/')[0]}.github.io/{REPO.split('/')[-1]}/scanner.html" if REPO else "",
         })
-        open_today.add((r["sym"], r["setup"]))
+    except Exception as e:
+        _state["errors"].append(f"push failed: {e!r}"[:150])
 
 
 def _r_mult(sig, price):
@@ -686,13 +795,17 @@ def resolve_signal(sig, df):
 
 
 def _close(sig, status, full_exit, rest_exit, ts, half_done):
-    sig["status"] = status
     sig["exit_time_ct"] = ts.astimezone(CT).strftime("%H:%M")
     sig["r_full"] = _r_mult(sig, full_exit)
     if half_done:
         sig["r_split"] = round(0.5 * _r_mult(sig, full_exit) + 0.5 * _r_mult(sig, rest_exit), 2)
     else:
         sig["r_split"] = sig["r_full"]
+    if status != "time":
+        # Label by the actual result, never by which exit fired (a T1 set below the entry
+        # once logged a "win" at negative R).
+        status = "win" if sig["r_split"] > 0 else "loss" if sig["r_split"] < 0 else "scratch"
+    sig["status"] = status
     sig.pop("mark_r", None)
 
 
@@ -731,7 +844,7 @@ def close_stale_signals():
 
 
 def signal_stats():
-    done = [x for x in load_signals() if x["status"] in ("win", "loss", "time")]
+    done = [x for x in load_signals() if x["status"] in ("win", "loss", "time", "scratch")]
 
     def agg(rows):
         if not rows:
@@ -745,6 +858,8 @@ def signal_stats():
     clean = lambda x: x.get("catalyst_strength") in ("strong", "squeeze") and not x.get("bad_headline")
     groups = {
         "all": done,
+        "ORB-TRIGGER": [x for x in done if x["setup"] == "ORB-TRIGGER"],
+        "IGNITION": [x for x in done if x["setup"] == "IGNITION"],
         "A-TRIGGER": [x for x in done if x["setup"] == "A-TRIGGER"],
         "B-BREAKOUT": [x for x in done if x["setup"] == "B-BREAKOUT"],
         "prime (before 10:30 CT)": [x for x in done if x.get("prime")],

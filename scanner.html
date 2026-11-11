@@ -50,6 +50,14 @@ h2 .n{color:var(--fg)}
 @media (max-width:420px){.grid{grid-template-columns:1fr}}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-width:0;border-left:4px solid var(--line)}
 .card.A-TRIGGER{border-left-color:var(--good)}.card.A-WATCH{border-left-color:var(--good)}
+.card.IGNITION,.card.ORB-TRIGGER{border-left-color:var(--good);box-shadow:0 0 0 1px var(--good)}.card.ORB-WATCH{border-left-color:var(--good)}
+.card.late{opacity:.6}.card.late .chip{filter:grayscale(1)}
+.chip.IGNITION,.chip.ORB-TRIGGER{background:var(--good);color:#06130b}.chip.ORB-WATCH{background:var(--good-bg);color:var(--good);border:1px solid var(--good)}
+.chip.LATE{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+.pnlbar{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--line);font:13px var(--sans)}
+.pnlbar b{font-family:var(--mono)}.pnlbar.half{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}.pnlbar.stop{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}.pnlbar.done{background:var(--good-bg);color:var(--good);border-color:var(--good)}
+.fresh td b{font-family:var(--mono)}
+button.inbtn[disabled]{opacity:.45;cursor:not-allowed}
 .card.B-BREAKOUT,.card.B-WATCH{border-left-color:var(--info)}.card.EXTENDED{border-left-color:var(--warn)}
 .card.flash{animation:flash 1.2s ease 2}
 @keyframes flash{50%{background:var(--good-bg)}}
@@ -141,7 +149,16 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
     <label for="maxIn">Cards to show<input id="maxIn" type="number" min="1" max="20" value="8"></label>
   </div>
   <div class="err" id="err" hidden></div>
+  <div class="pnlbar" id="pnlBar"></div>
 </header>
+
+<div id="freshWrap" hidden>
+<h2>Fresh signals <span class="n" id="freshN"></span> <small style="text-transform:none;letter-spacing:0">· stay up 15 min · grey = after 10:30 CT</small></h2>
+<div class="tbl"><table class="fresh">
+  <thead><tr><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry ≥</th><th>Stop</th><th>T1</th><th>Now</th><th>Status</th></tr></thead>
+  <tbody id="fresh"></tbody>
+</table></div>
+</div>
 
 <div id="posWrap" hidden>
 <h2>My positions <span class="n" id="posN"></span></h2>
@@ -157,7 +174,7 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
 </div>
 
 <h2>Survivors <span class="n" id="survN"></span></h2>
-<div class="grid" id="cards"><div class="empty">Waiting for the first scan. The scanner runs every ~2 minutes from 5:15 to 15:15 CT on weekdays.</div></div>
+<div class="grid" id="cards"><div class="empty">Waiting for the first scan. The scanner runs every ~2 minutes from 5:15 to 16:15 CT on weekdays.</div></div>
 
 <div id="moreWrap" hidden>
 <h2>More survivors <span class="n" id="moreN"></span></h2>
@@ -174,7 +191,7 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
 </table></div>
 
 <h2>Scanner track record</h2>
-<div class="score" id="score"><p class="lead">Every A-TRIGGER and B-BREAKOUT is logged and scored from 5-minute bars: did price trade through the entry, then reach the target or the stop first? Results appear after the first scored signal.</p></div>
+<div class="score" id="score"><p class="lead">Every IGNITION, ORB-TRIGGER, A-TRIGGER and B-BREAKOUT is logged and scored from 5-minute bars: did price trade through the entry, then reach the target or the stop first? Results appear after the first scored signal.</p></div>
 
 <div class="modal" id="modal" hidden>
   <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -193,6 +210,8 @@ const REPO = "phinehasopenclaw/stock-prices", BRANCH = "scan-data";
 const API = `https://api.github.com/repos/${REPO}/contents/scan.json?ref=${BRANCH}`;
 const RAW = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/scan.json`;
 const $ = id => document.getElementById(id);
+const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT"];
+const LOSS_HALF = -200, LOSS_STOP = -400, WIN_DONE = 1200;   // Rule 9 + half-size step
 const store = {
   get(k, d){ try { const v = localStorage.getItem("gs_" + k); return v === null ? d : v; } catch(e){ return d; } },
   set(k, v){ try { localStorage.setItem("gs_" + k, v); } catch(e){} }
@@ -250,8 +269,8 @@ async function loadScan(){
 function checkTransitions(prev, next){
   const before = {}; (prev?.survivors || []).forEach(r => before[r.sym] = r.setup);
   (next.survivors || []).forEach(r => {
-    if (r.setup === "A-TRIGGER" && before[r.sym] !== "A-TRIGGER")
-      alertOnce(r.sym + "|trig|" + next.loop, `${r.sym} A-setup triggered`, `Entry ${fmt(r.entry)} · stop ${fmt(r.stop)} · ${r.setup_note || ""}`);
+    if (SIGNALS.includes(r.setup) && before[r.sym] !== r.setup && !r.late)
+      alertOnce(r.sym + "|trig|" + r.setup + "|" + next.loop, `${r.sym} ${r.setup}`, `Entry ${fmt(r.entry)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)} · ${r.setup_note || ""}`);
   });
 }
 async function pollLive(){
@@ -299,7 +318,7 @@ function card(r){
     const sh = Math.floor(risk / (r.entry - r.stop));
     size = `<div class="size">Size at $${risk} risk: <b>${sh.toLocaleString()} sh</b> · $${Math.round(sh * r.entry).toLocaleString()} deployed</div>`;
   }
-  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH"].includes(r.setup))
+  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH","ORB-WATCH","ORB-TRIGGER","IGNITION"].includes(r.setup) && !r.late)
     alertOnce(r.sym + "|entry|" + r.entry, `${r.sym} through entry ${fmt(r.entry)}`, `Now ${fmt(price)} · stop ${fmt(r.stop)}`);
   const lv = r.entry ? `<div class="levels">
       <div class="lv entry"><i>Entry ≥</i><b>${fmt(r.entry)}</b></div>
@@ -312,17 +331,17 @@ function card(r){
   const tags = [`<span class="chip cat">${esc(r.catalyst_type ? r.catalyst_type + " · " + r.catalyst_strength : "Catalyst: " + r.catalyst_strength)}</span>`,
     r.quality != null ? `<span class="chip cat">Rank score ${fmt(r.quality,1)}</span>` : ""]
     .concat((r.warnings || []).map(w => `<span class="chip warnf">${esc(w)}</span>`)).join("");
-  return `<article class="card ${esc(r.setup)}" data-sym="${esc(r.sym)}">
+  return `<article class="card ${esc(r.setup)}${r.late && SIGNALS.includes(r.setup) ? " late" : ""}" data-sym="${esc(r.sym)}">
     <div class="top"><div style="min-width:0"><div class="sym">${esc(r.sym)}</div><div class="nm">${esc(r.name)}</div></div>
       <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div><div class="${chg >= 0 ? "up" : "dn"}">${chg >= 0 ? "+" : ""}${fmt(chg,1)}%</div>${L ? `<div class="live">LIVE</div>` : ""}</div></div>
-    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span></div>
+    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">LATE · skip or half size</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
     <div class="note">${esc(r.setup_note || "")}</div>
     ${lv}${size}
     ${sparkSVG(r.spark)}
     <div class="stats"><span>VWAP <b>${fmt(r.vwap)}</b></span><span>High <b>${fmt(r.sess_high)}</b></span><span>PM <b>${fmt(r.pm_low)}–${fmt(r.pm_high)}</b></span>
       <span>Rel vol <b>${fmt(r.rel_vol,1)}x</b></span><span>Surge <b>${fmt(r.vol_surge,1)}x</b></span><span>Float <b>${fmtBig(r.float)}</b></span><span>Cap <b>${fmtBig(r.mcap)}</b></span></div>
     ${cat}${r.bad_headline ? `<div class="cat"><small class="dn">Also in the news: ${esc(r.bad_headline)}</small></div>` : ""}<div class="tags">${tags}</div>
-    ${positions[r.sym] ? `<button type="button" class="inbtn on" data-goto="${esc(r.sym)}">Tracking above</button>` : `<button type="button" class="inbtn" data-in="${esc(r.sym)}">I'm in</button>`}
+    ${positions[r.sym] ? `<button type="button" class="inbtn on" data-goto="${esc(r.sym)}">Tracking above</button>` : `<button type="button" class="inbtn" data-in="${esc(r.sym)}"${dayState().block ? " disabled" : ""}>${dayState().block ? "Done for the day" : "I'm in"}</button>`}
   </article>`;
 }
 function render(){
@@ -330,6 +349,8 @@ function render(){
   const max = +store.get("max", "8") || 8, surv = scan.survivors || [], rej = scan.rejected || [];
   renderPositions();
   renderScore();
+  renderFresh();
+  renderPnl();
   $("survN").textContent = `· ${surv.length}`;
   $("rejN").textContent = `· ${rej.length}`;
   const extra = surv.slice(max);
@@ -425,7 +446,7 @@ function finish(sym){
 }
 document.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
-  if (b.dataset.in) openIn(b.dataset.in);
+  if (b.dataset.in && !dayState().block) openIn(b.dataset.in);
   if (b.dataset.goto) $("posWrap").scrollIntoView({ behavior: "smooth" });
   const sym = b.dataset.sym, p = sym && positions[sym]; if (!p) return;
   const open = p.shares - p.sold, px = p.last;
@@ -501,6 +522,44 @@ function posCard(p){
       <button type="button" data-sym="${esc(p.sym)}" data-act="exit">Exit</button>
       <button type="button" data-sym="${esc(p.sym)}" data-act="drop">Remove</button></div>
   </article>`;
+}
+function dayPnl(){
+  const realized = closedToday.reduce((s, c) => s + c.pnl, 0);
+  let open = 0;
+  for (const p of Object.values(positions)) {
+    const L = live[p.sym], row = (scan?.survivors || []).find(x => x.sym === p.sym);
+    const px = L ? L.p : (row?.price ?? p.last ?? p.entry);
+    open += p.realized + (px - p.entry) * (p.shares - p.sold);
+  }
+  const other = +store.get("other_" + todayCT(), "0") || 0;
+  return { realized, open, other, total: realized + open + other };
+}
+function dayState(){
+  const t = dayPnl().total;
+  return { t, block: t <= LOSS_STOP || t >= WIN_DONE, half: t <= LOSS_HALF && t > LOSS_STOP };
+}
+function renderPnl(){
+  const d = dayPnl(), st = dayState(), el = $("pnlBar");
+  el.className = "pnlbar" + (t => t <= LOSS_STOP ? " stop" : t >= WIN_DONE ? " done" : t <= LOSS_HALF ? " half" : "")(d.total);
+  const msg = d.total <= LOSS_STOP ? "Rule 9: down $400. Done for the day. Flat and finished."
+    : d.total >= WIN_DONE ? "Rule 9: up $1,200. Done for the day. Flat and finished."
+    : d.total <= LOSS_HALF ? "Down one full risk. Half size only from here; $400 is the hard stop."
+    : `Room before the $400 loss limit: <b>${fmtUSD(d.total - LOSS_STOP)}</b>`;
+  el.innerHTML = `<span>Day P&amp;L <b>${fmtUSD(d.total)}</b></span><span class="m">closed ${fmtUSD(d.realized)} · open ${fmtUSD(d.open)}${d.other ? " · other " + fmtUSD(d.other) : ""}</span>
+    <span>${msg}</span><button type="button" id="otherBtn">Add untracked P&amp;L</button>`;
+  $("otherBtn").onclick = () => openModal("Untracked P&L today", [{ k: "v", label: "Closed P&L from trades not tracked here ($, loss is negative)", v: d.other }],
+    "Counts toward the $400 loss limit and the $1,200 done trigger. Resets tomorrow.", "Save", v => { if (!isNaN(v.v)) store.set("other_" + todayCT(), String(v.v)); });
+}
+function renderFresh(){
+  const now = Date.now() / 1000, rows = (scan.signals_today || []).filter(x => now - x.ts <= 15 * 60).sort((a, b) => b.ts - a.ts);
+  $("freshWrap").hidden = !rows.length;
+  $("freshN").textContent = rows.length ? `· ${rows.length}` : "";
+  $("fresh").innerHTML = rows.map(x => {
+    const L = live[x.sym], row = (scan.survivors || []).find(r => r.sym === x.sym), p = L ? L.p : row?.price;
+    const late = !x.prime;
+    return `<tr style="${late ? "opacity:.55" : ""}"><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b></td><td><span class="chip ${esc(x.setup)}">${esc(x.setup)}</span>${late ? ' <span class="chip LATE">LATE</span>' : ""}</td>
+      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(x.t1)}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td><td><span class="st ${esc(x.status)}">${esc(x.status)}</span></td></tr>`;
+  }).join("");
 }
 function renderPositions(){
   const ps = Object.values(positions);
