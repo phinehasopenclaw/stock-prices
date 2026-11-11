@@ -437,6 +437,20 @@ document.addEventListener("click", e => {
       "Log the stop you actually have working, so alerts and the plan stay in sync.", "Update", v => { if (v.stop > 0) { p.stop = v.stop; savePos(); } });
   if (b.dataset.act === "exit") openModal(`${sym}: exit`, [{ k: "price", label: "Exit price", v: fmt(px, px < 10 ? 3 : 2) }, { k: "shares", label: "Shares", v: open }],
       "", "Record exit", v => { if (v.price > 0 && v.shares > 0) { recordExit(p, v.shares, v.price); if (p.sold >= p.shares) finish(sym); else savePos(); } });
+   if (b.dataset.act === "edit") openModal(`${sym}: edit position`, [
+      { k: "entry", label: "Fill price", v: fmt(p.entry, p.entry < 10 ? 3 : 2) },
+      { k: "shares", label: "Shares", v: p.shares },
+      { k: "stop0", label: "Initial stop (sets R)", v: fmt(p.stop0) },
+      { k: "stop", label: "Stop working now", v: fmt(p.stop) },
+      { k: "t1", label: "Target 1 (half)", v: fmt(p.t1) },
+      { k: "t2", label: "Target 2 (rest)", v: fmt(p.t2) }],
+      "Correct the fill and levels. R, +1R and P&L recalculate from these.", "Save", v => {
+        if (!(v.entry > 0 && v.shares > 0 && v.stop0 > 0 && v.stop0 < v.entry)) return;
+        p.entry = v.entry; p.shares = Math.round(v.shares); p.stop0 = v.stop0;
+        p.stop = v.stop > 0 ? v.stop : v.stop0;
+        p.t1 = v.t1 > v.entry ? v.t1 : r2(v.entry + 2 * (v.entry - v.stop0));
+        p.t2 = v.t2 > v.entry ? v.t2 : r2(v.entry + 3 * (v.entry - v.stop0));
+        savePos(); render(); });
   if (b.dataset.act === "drop") { delete positions[sym]; savePos(); render(); }
 });
 
@@ -482,6 +496,7 @@ function posCard(p){
     <div class="next ${cls}">${next}</div>
     <div class="levels"><div class="lv"><i>+1R</i><b>${fmt(plus1R)}</b></div><div class="lv"><i>T1</i><b>${fmt(p.t1)}</b></div><div class="lv"><i>T2</i><b>${fmt(p.t2)}</b></div><div class="lv"><i>VWAP</i><b>${fmt(row?.vwap)}</b></div></div>
     <div class="pbtns">${p.half ? "" : `<button type="button" data-sym="${esc(p.sym)}" data-act="t1">T1 half filled</button>`}
+      <button type="button" data-sym="${esc(p.sym)}" data-act="edit">Edit</button>
       <button type="button" data-sym="${esc(p.sym)}" data-act="stop">Moved stop</button>
       <button type="button" data-sym="${esc(p.sym)}" data-act="exit">Exit</button>
       <button type="button" data-sym="${esc(p.sym)}" data-act="drop">Remove</button></div>
