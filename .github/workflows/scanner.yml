@@ -2,23 +2,51 @@ name: Gap scanner
 
 # One long-running job per half-day. GitHub's cron is often delayed, so each run
 # loops on its own clock (every ~2 min) instead of relying on frequent schedules.
+#
+# GitHub cron is UTC-only. To hold 05:15 CT and 11:00 CT year-round, each slot
+# is scheduled at both its CDT and CST UTC time; the gate job lets through only
+# the one that matches Chicago's current offset. Concurrency sits on the scan
+# job (not the workflow) so a gated-off run never cancels the live scanner.
 on:
   schedule:
-    - cron: '15 11 * * 1-5'   # 05:15 CT start (runs ~6h)
-    - cron: '0 17 * * 1-5'    # 11:00 CT start (takes over through the close)
+    - cron: '15 10 * * 1-5'   # 05:15 CDT (summer)
+    - cron: '15 11 * * 1-5'   # 05:15 CST (winter)
+    - cron: '0 16 * * 1-5'    # 11:00 CDT (summer) - takes over through the close
+    - cron: '0 17 * * 1-5'    # 11:00 CST (winter) - takes over through the close
   push:
     branches: [main]
     paths: ['scan.py', '.github/workflows/scanner.yml']
   workflow_dispatch:
 
-concurrency:
-  group: gap-scanner
-  cancel-in-progress: true
-
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHED: ${{ github.event.schedule }}
+        run: |
+          if [ "$EVENT" != "schedule" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          offset=$(TZ=America/Chicago date +%z)   # -0500 in CDT, -0600 in CST
+          case "$SCHED" in
+            '15 10 * * 1-5'|'0 16 * * 1-5') want=-0500 ;;
+            *) want=-0600 ;;
+          esac
+          if [ "$offset" = "$want" ]; then run=true; else run=false; fi
+          echo "schedule='$SCHED' chicago=$offset -> run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   scan:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 355
+    concurrency:
+      group: gap-scanner
+      cancel-in-progress: true
     permissions:
       contents: write
     steps:
