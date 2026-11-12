@@ -34,6 +34,7 @@ PRICE_MIN, PRICE_MAX = 1.0, 100.0
 MCAP_MIN = 50e6
 FLOAT_MIN = 5e6            # shares; below this, spreads gap and stops slip badly
 DOLLAR_VOL_MIN = 3e6       # $ traded today before a name counts as liquid
+PM_DOLLAR_MIN = 250_000    # pre-market: $ traded so far before a name shows on the watch list
 AVGVOL_MIN = 150_000
 SURGE_MIN = 1.5            # completed-bar volume vs baseline for A-TRIGGER / B-BREAKOUT
 IGNITION_PACE = 3.0        # forming-bar volume pace vs baseline for IGNITION
@@ -320,6 +321,12 @@ def analyze_bars(df, row, session):
         "sess_low": fnum(sess_low),
         "cum_vol": int(df["Volume"].fillna(0).sum()),
     })
+    if session == "PRE" and len(reg) == 0 and len(pre) < 3:
+        # Sparse pre-market prints are normal; show it for awareness, never as an entry.
+        row["setup"] = "PM-WATCH"
+        row["setup_note"] = (f"Pre-market only ({len(pre)} print{'s' if len(pre) != 1 else ''}). "
+                             "Watch it into the open; no entry before the first 5-min candle (Rule 8).")
+        return
     if vwap is None or len(sess) < 3:
         row["setup"] = "THIN"
         row["setup_note"] = "Too few bars to read yet."
@@ -564,10 +571,10 @@ def check_news(row):
 
 # ---- Filter & rank --------------------------------------------------------
 SETUP_RANK = {"IGNITION": 0, "ORB-TRIGGER": 0, "A-TRIGGER": 0, "ORB-WATCH": 1, "A-WATCH": 1, "B-BREAKOUT": 2, "B-WATCH": 3,
-              "HOLDING": 4, "EXTENDED": 5, "THIN": 6, "FADING": 7, "NO DATA": 8}
+              "HOLDING": 4, "PM-WATCH": 4, "EXTENDED": 5, "THIN": 6, "FADING": 7, "NO DATA": 8}
 
 
-def apply_filter(r):
+def apply_filter(r, session=None):
     rel = None
     if r.get("avg_vol") and r.get("cum_vol"):
         rel = r["cum_vol"] / r["avg_vol"]
@@ -581,7 +588,8 @@ def apply_filter(r):
     dollar_vol = (r.get("cum_vol") or 0) * (r.get("price") or 0)
     r["dollar_vol"] = int(dollar_vol)
     tiny_float = flt is not None and flt < FLOAT_MIN
-    liquid_ok = (not tiny_float) and dollar_vol >= DOLLAR_VOL_MIN and (
+    dv_min = PM_DOLLAR_MIN if session == "PRE" else DOLLAR_VOL_MIN
+    liquid_ok = (not tiny_float) and dollar_vol >= dv_min and (
         (r.get("mcap") or 0) >= MCAP_MIN or (rel or 0) >= 1.0)
     r["filter"] = {"catalyst": bool(catalyst_ok or squeeze), "holding": holding_ok, "liquidity": liquid_ok}
     if squeeze and not catalyst_ok:
@@ -594,7 +602,8 @@ def apply_filter(r):
         reasons.append({"FADING": "Fading below VWAP", "THIN": "Too few bars"}.get(r.get("setup"), "No bar data"))
     if not liquid_ok:
         reasons.append("Tiny float (<5M sh)" if tiny_float else
-                       "Under $3M traded" if dollar_vol < DOLLAR_VOL_MIN else "Thin / small")
+                       (f"Under ${dv_min/1e6:g}M traded" if dv_min >= 1e6 else f"Under ${dv_min/1e3:g}K traded")
+                       if dollar_vol < dv_min else "Thin / small")
     r["reject"] = reasons
     r["pass"] = not reasons
 
@@ -915,7 +924,12 @@ def one_loop():
     top = movers[:MAX_BAR_NAMES]
     fetch_bars(top, session)
     for r in top:
-        r["cum_vol"] = r.get("cum_vol") or r.get("day_vol") or r.get("pm_vol")
+        if session == "PRE":
+            # Yahoo pre-market bars carry no volume and day_vol is still yesterday's;
+            # the screener's preMarketVolume is the only honest number before the open.
+            r["cum_vol"] = r.get("pm_vol") or r.get("cum_vol") or 0
+        else:
+            r["cum_vol"] = r.get("cum_vol") or r.get("day_vol") or r.get("pm_vol")
     # News for the strongest candidates (by preliminary setup + gap).
     prelim = sorted(top, key=lambda r: (SETUP_RANK.get(r.get("setup"), 9) >= 7, -r["chg_pct"]))
     for r in prelim[:MAX_NEWS_NAMES]:
@@ -927,7 +941,7 @@ def one_loop():
         fill_profile(r)
     for r in top:
         r.setdefault("catalyst_strength", "unchecked")
-        apply_filter(r)
+        apply_filter(r, session)
     survivors = sorted([r for r in top if r["pass"]], key=score)
     rejected = sorted([r for r in top if not r["pass"]], key=lambda r: -r["chg_pct"])
     for r in survivors + rejected:
@@ -971,6 +985,21 @@ def one_loop():
     return session
 
 
+def relay():
+    """GitHub jobs stop at 6h and its cron can run hours late, so a run that hits its
+    time limit before the close starts its own successor."""
+    if not (REPO and TOKEN):
+        return
+    try:
+        r = requests.post(f"https://api.github.com/repos/{REPO}/actions/workflows/scanner.yml/dispatches",
+                          headers={"Authorization": f"Bearer {TOKEN}",
+                                   "Accept": "application/vnd.github+json"},
+                          json={"ref": "main"}, timeout=20)
+        log(f"relay dispatch -> HTTP {r.status_code}")
+    except Exception as e:
+        log(f"relay dispatch failed: {e!r}")
+
+
 def main():
     start = time.time()
     end_today = dt.datetime.now(CT).replace(hour=END_CT_HHMM[0], minute=END_CT_HHMM[1],
@@ -983,7 +1012,11 @@ def main():
         except Exception:
             log("loop crashed:\n" + traceback.format_exc())
             session = "ERROR"
-        if ONE_SHOT or time.time() >= deadline:
+        if ONE_SHOT:
+            break
+        if time.time() >= deadline:
+            if time.time() < end_today.timestamp() - 300:
+                relay()
             break
         if session == "CLOSED" and dt.datetime.now(ET).hour >= 16:
             log("Market closed for the day; exiting.")
