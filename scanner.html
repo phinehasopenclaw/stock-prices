@@ -222,6 +222,9 @@ const fmtBig = x => x == null ? "—" : x >= 1e9 ? (x/1e9).toFixed(2)+"B" : x >=
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 // ---- settings
+// One-time setup link: scanner.html#key=XXXX saves the Finnhub key in this browser, then wipes it from the address bar.
+(() => { const m = location.hash.match(/key=([A-Za-z0-9]+)/);
+  if (m) { store.set("key", m[1]); history.replaceState(null, "", location.pathname + location.search); } })();
 $("riskIn").value = store.get("risk", "200");
 $("keyIn").value = store.get("key", "");
 $("maxIn").value = store.get("max", "8");
