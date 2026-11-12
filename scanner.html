@@ -502,14 +502,14 @@ function posCard(p){
   if (!p.half) {
     const beNow = price >= plus1R && p.stop < p.entry;
     orders = [
-      [`STOP-LIMIT SELL <b>${stopHalf}</b> @ ${fmt(p.stop)} · limit ${fmt(stopLimit(p.stop))}`, "Protects half"],
-      [`LIMIT SELL <b>${tgtHalf}</b> @ ${fmt(p.t1)}`, "Target half"],
+      [`STOP-LIMIT SELL <b>${open}</b> @ ${fmt(p.stop)} · limit ${fmt(stopLimit(p.stop))}`, "Protects ALL shares"],
+      [`At T1 ${fmt(p.t1)}: cancel the stop, LIMIT SELL <b>${tgtHalf}</b>, re-stop the rest at ${fmt(p.entry)}`, "Alert-driven, no resting order"],
     ];
-    if (price <= p.stop * 1.003) { next = `At the stop. If the stop half filled, sell the other ${tgtHalf} now: cancel the T1 limit and sell with a limit at the bid.`; cls = "warn";
-      alertOnce(p.sym + "|stop|" + p.stop, `${p.sym} at stop ${fmt(p.stop)}`, "Sell the target half too."); }
-    else if (price >= p.t1) { next = `T1 reached. Confirm the ${tgtHalf}-share limit filled, then tap "T1 half filled".`; cls = "go";
-      alertOnce(p.sym + "|t1", `${p.sym} hit T1 ${fmt(p.t1)}`, "Confirm the half filled, then raise the stop to breakeven."); }
-    else if (beNow) { next = `Up 1R. Move the stop half to breakeven: replace the stop with ${fmt(p.entry)}.`; cls = "go";
+    if (price <= p.stop * 1.003) { next = `At the stop. Confirm all ${open} shares sold; if the stop-limit didn't fill, sell with a limit at the bid.`; cls = "warn";
+      alertOnce(p.sym + "|stop|" + p.stop, `${p.sym} at stop ${fmt(p.stop)}`, "Confirm the full position is out."); }
+    else if (price >= p.t1) { next = `T1 reached. Cancel the stop, sell ${tgtHalf} with a limit, put a stop on the other ${open - tgtHalf} at ${fmt(p.entry)}, then tap "T1 half filled".`; cls = "go";
+      alertOnce(p.sym + "|t1", `${p.sym} hit T1 ${fmt(p.t1)}`, "Sell half, re-stop the rest at breakeven."); }
+    else if (beNow) { next = `Up 1R. Replace the stop on all ${open} shares with ${fmt(p.entry)} (breakeven).`; cls = "go";
       alertOnce(p.sym + "|1r", `${p.sym} +1R at ${fmt(plus1R)}`, `Move the stop to breakeven ${fmt(p.entry)}.`); }
     else next = `Hold. Next action at ${fmt(plus1R)} (+1R): stop to breakeven. Target ${fmt(p.t1)}.`;
   } else {
@@ -525,7 +525,8 @@ function posCard(p){
     alertOnce(p.sym + "|time|" + todayCT(), `${p.sym}: 14:45 time check`, "Close or set an overnight stop."); }
   return `<article class="pos">
     <div class="top"><div style="min-width:0"><div class="sym">${esc(p.sym)}</div><div class="nm">${p.shares.toLocaleString()} sh @ ${fmt(p.entry, p.entry < 10 ? 3 : 2)} · stop ${fmt(p.stop)}${p.half ? " · half sold" : ""}</div></div>
-      <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div>${L ? `<div class="live">LIVE</div>` : `<div class="live" style="color:var(--muted)">SCAN PRICE</div>`}</div></div>
+      <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div>${L ? `<div class="live">LIVE</div>` : `<div class="live" style="color:var(--bad)">STALE</div>`}</div></div>
+    ${L ? "" : `<div class="next warn">No live quote: P&amp;L is from the last scan${row ? "" : " this name appeared in, and may be far off"}. Paste your Finnhub key in Settings.</div>`}
     <div class="pnl ${total >= 0 ? "up" : "dn"}">${fmtUSD(total)}<small>${rNow >= 0 ? "+" : ""}${fmt(rNow, 2)}R</small></div>
     <div class="orders">${orders.map(([t, tag]) => `<div class="order"><span>${t}</span><span class="tag">${esc(tag)}</span></div>`).join("")}</div>
     <div class="next ${cls}">${next}</div>
@@ -546,11 +547,18 @@ function dayPnl(){
     open += p.realized + (px - p.entry) * (p.shares - p.sold);
   }
   const other = +store.get("other_" + todayCT(), "0") || 0;
-  return { realized, open, other, total: realized + open + other };
+  // Loss if every working stop fills from here (risk still on the table).
+  let atRisk = 0;
+  for (const p of Object.values(positions)) {
+    const L = live[p.sym], row = (scan?.survivors || []).find(x => x.sym === p.sym);
+    const px = L ? L.p : (row?.price ?? p.last ?? p.entry);
+    atRisk += Math.max(0, (px - p.stop) * (p.shares - p.sold));
+  }
+  return { realized, open, other, total: realized + open + other, atRisk };
 }
 function dayState(){
-  const t = dayPnl().total;
-  return { t, block: t <= LOSS_STOP || t >= WIN_DONE, half: t <= LOSS_HALF && t > LOSS_STOP };
+  const d = dayPnl(), t = d.total;
+  return { t, block: t <= LOSS_STOP || t >= WIN_DONE || d.atRisk >= t - LOSS_STOP, half: t <= LOSS_HALF && t > LOSS_STOP };
 }
 function renderPnl(){
   const d = dayPnl(), st = dayState(), el = $("pnlBar");
@@ -558,7 +566,8 @@ function renderPnl(){
   const msg = d.total <= LOSS_STOP ? "Rule 9: down $400. Done for the day. Flat and finished."
     : d.total >= WIN_DONE ? "Rule 9: up $1,200. Done for the day. Flat and finished."
     : d.total <= LOSS_HALF ? "Down one full risk. Half size only from here; $400 is the hard stop."
-    : `Stop at −$400: <b>$${Math.round(d.total - LOSS_STOP).toLocaleString("en-US")}</b> of loss room · Done at +$1,200: <b>$${Math.round(WIN_DONE - d.total).toLocaleString("en-US")}</b> to go`;
+    : `Stop at −$400: <b>$${Math.round(d.total - LOSS_STOP).toLocaleString("en-US")}</b> of loss room · Done at +$1,200: <b>$${Math.round(WIN_DONE - d.total).toLocaleString("en-US")}</b> to go`
+      + (d.atRisk > 0 ? ` · <span style="color:${d.atRisk > d.total - LOSS_STOP ? "var(--bad)" : "inherit"}">If every stop fills: <b>−$${Math.round(d.atRisk).toLocaleString("en-US")}</b>${d.atRisk > d.total - LOSS_STOP ? " — over the room. No new entries; cut or tighten." : ""}</span>` : "");
   el.innerHTML = `<span>Day P&amp;L <b>${fmtUSD(d.total)}</b></span><span class="m">closed ${fmtUSD(d.realized)} · open ${fmtUSD(d.open)}${d.other ? " · other " + fmtUSD(d.other) : ""}</span>
     <span>${msg}</span><button type="button" id="otherBtn">Add untracked P&amp;L</button>`;
   $("otherBtn").onclick = () => openModal("Untracked P&L today", [{ k: "v", label: "Closed P&L from trades not tracked here ($, loss is negative)", v: d.other }],
