@@ -253,14 +253,23 @@ function alertOnce(key, title, body){
 }
 
 // ---- data
-async function loadScan(){
-  let data = null, err = null;
+let scanEtag = null, scanSource = "";
+async function loadScan(force){
+  if (document.hidden && !force) return;   // background tabs don't spend the shared rate limits
+  let data = null, err = null, notModified = false;
   try {
-    const r = await fetch(API, { headers: { Accept: "application/vnd.github.raw+json" }, cache: "no-store" });
-    if (r.ok) data = await r.json(); else err = "GitHub API " + r.status;
+    // Conditional request: a 304 (nothing new) doesn't count against GitHub's 60/hour limit.
+    const h = { Accept: "application/vnd.github.raw+json" };
+    if (scanEtag && scan) h["If-None-Match"] = scanEtag;
+    const r = await fetch(API, { headers: h, cache: "no-store" });
+    if (r.status === 304) notModified = true;
+    else if (r.ok) { data = await r.json(); scanEtag = r.headers.get("ETag"); scanSource = ""; }
+    else err = r.status === 403 || r.status === 429 ? "GitHub rate limit" : "GitHub API " + r.status;
   } catch(e){ err = e.message; }
+  if (notModified) { $("err").hidden = true; render(); return; }
   if (!data) {
-    try { const r = await fetch(RAW + "?t=" + Date.now(), { cache: "no-store" }); if (r.ok) data = await r.json(); }
+    try { const r = await fetch(RAW + "?t=" + Date.now(), { cache: "no-store" });
+          if (r.ok) { data = await r.json(); scanSource = " (cached copy — " + err + ")"; } }
     catch(e){ err = err || e.message; }
   }
   if (data) { $("err").hidden = true; checkTransitions(scan, data); scan = data; render(); }
@@ -273,24 +282,29 @@ function checkTransitions(prev, next){
       alertOnce(r.sym + "|trig|" + r.setup + "|" + next.loop, `${r.sym} ${r.setup}`, `Entry ${fmt(r.entry)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)} · ${r.setup_note || ""}`);
   });
 }
-async function pollLive(){
+let liveAt = 0, liveNote = "";
+async function pollLive(force){
+  if (document.hidden && !force) return;
   const key = store.get("key", "");
   const pill = $("livePill");
   if (!key || !scan) { pill.className = "pill"; $("liveTxt").textContent = key ? "Live quotes ready" : "Live quotes off"; return; }
   const held = Object.keys(positions);
   if (scan.session !== "REGULAR" && !held.length) { pill.className = "pill"; $("liveTxt").textContent = "Live quotes start 8:30 CT"; return; }
   const cardSyms = scan.session === "REGULAR" ? (scan.survivors || []).slice(0, Math.min(12, +store.get("max", "8") || 8)).map(r => r.sym) : [];
-  const syms = [...new Set(held.concat(cardSyms))].slice(0, 15);
-  let ok = 0;
+  const syms = [...new Set(held.concat(cardSyms))].slice(0, 10);   // 10 every 15s = 40/min, under Finnhub's 60/min
+  let ok = 0, limited = 0;
   await Promise.all(syms.map(async s => {
     try {
       const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(s)}&token=${encodeURIComponent(key)}`, { cache: "no-store" });
+      if (r.status === 429) { limited++; return; }
       if (!r.ok) return; const q = await r.json();
       if (q && q.c) { live[s] = { p: q.c, h: q.h, t: Date.now() }; ok++; }
     } catch(e){}
   }));
-  pill.className = "pill " + (ok ? "ok" : "dead");
-  $("liveTxt").textContent = ok ? `Live · ${ok} quotes` : "Live quotes failed";
+  if (ok) liveAt = Date.now();
+  pill.className = "pill " + (limited ? "stale" : ok ? "ok" : "dead");
+  $("liveTxt").textContent = limited ? `Finnhub rate limit (${limited} missed) — close other scanner tabs`
+    : ok ? `Live · ${ok} quotes` : "Live quotes failed";
   render();
 }
 
@@ -379,7 +393,7 @@ function render(){
 function tick(){
   if (scan) {
     const age = (Date.now() - new Date(scan.updated_utc).getTime()) / 1000;
-    $("age").textContent = `Scan ${age < 90 ? Math.round(age) + "s" : Math.round(age / 60) + "m"} ago · ${scan.updated_ct.slice(11, 16)} CT`;
+    $("age").textContent = `Scan ${age < 90 ? Math.round(age) + "s" : Math.round(age / 60) + "m"} ago · ${scan.updated_ct.slice(11, 16)} CT${scanSource}`;
     $("agePill").className = "pill " + (age < 300 ? "ok" : age < 900 ? "stale" : "dead");
   }
   // Hands-off window: 8:30–8:45 CT on weekdays.
@@ -601,10 +615,10 @@ function renderScore(){
 }
 
 loadScan();
-setInterval(loadScan, 75000);
-setInterval(pollLive, 20000);
+setInterval(loadScan, 30000);
+setInterval(pollLive, 15000);
 setInterval(tick, 15000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadScan(); pollLive(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadScan(true); pollLive(true); } });
 </script>
 </body>
 </html>
