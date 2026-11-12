@@ -229,6 +229,7 @@ $("riskIn").value = store.get("risk", "200");
 $("keyIn").value = store.get("key", "");
 $("maxIn").value = store.get("max", "8");
 $("setBtn").onclick = () => { $("settings").hidden = !$("settings").hidden; };
+$("livePill").onclick = () => { if (!store.get("key", "")) { $("settings").hidden = false; $("keyIn").focus(); } };
 ["riskIn","keyIn","maxIn"].forEach(id => $(id).addEventListener("change", () => {
   store.set({riskIn:"risk",keyIn:"key",maxIn:"max"}[id], $(id).value.trim()); render(); pollLive();
 }));
@@ -290,7 +291,8 @@ async function pollLive(force){
   if (document.hidden && !force) return;
   const key = store.get("key", "");
   const pill = $("livePill");
-  if (!key || !scan) { pill.className = "pill"; $("liveTxt").textContent = key ? "Live quotes ready" : "Live quotes off"; return; }
+  if (!key || !scan) { pill.className = "pill" + (key ? "" : " dead"); pill.style.cursor = key ? "" : "pointer";
+    $("liveTxt").textContent = key ? "Live quotes ready" : "Live quotes off: tap to set up"; return; }
   const held = Object.keys(positions);
   if (scan.session !== "REGULAR" && !held.length) { pill.className = "pill"; $("liveTxt").textContent = "Live quotes start 8:30 CT"; return; }
   const cardSyms = scan.session === "REGULAR" ? (scan.survivors || []).slice(0, Math.min(12, +store.get("max", "8") || 8)).map(r => r.sym) : [];
@@ -311,6 +313,15 @@ async function pollLive(force){
   render();
 }
 
+// Best price for a symbol: this browser's live quote (15s), else the scanner's own quote (~1 min), else none.
+function quoteFor(sym){
+  const L = live[sym];
+  if (L && Date.now() - L.t < 90000) return { p: L.p, h: L.h, src: "live" };
+  const q = scan?.quotes?.[sym];
+  if (q && q.p && Date.now() / 1000 - q.t < 300) return { p: q.p, h: q.h, src: "scan" };
+  return null;
+}
+
 // ---- render
 function sparkSVG(sp){
   if (!sp || !sp.c || sp.c.length < 2) return "";
@@ -327,7 +338,7 @@ function sparkSVG(sp){
     <circle cx="${x(c.length-1, c.length)}" cy="${y(c[c.length-1])}" r="2.6" fill="${up ? "var(--good)" : "var(--bad)"}"/></svg>`;
 }
 function card(r){
-  const L = live[r.sym], price = L ? L.p : r.price;
+  const L = quoteFor(r.sym), price = L ? L.p : r.price;
   const chg = r.prev_close ? (price / r.prev_close - 1) * 100 : r.chg_pct;
   const risk = +store.get("risk", "200") || 200;
   let size = "";
@@ -374,7 +385,7 @@ function render(){
   $("moreWrap").hidden = !extra.length;
   $("moreN").textContent = `· ${extra.length}`;
   $("more").innerHTML = extra.map((r, i) => {
-    const L = live[r.sym], p = L ? L.p : r.price, c = r.prev_close ? (p / r.prev_close - 1) * 100 : r.chg_pct;
+    const L = quoteFor(r.sym), p = L ? L.p : r.price, c = r.prev_close ? (p / r.prev_close - 1) * 100 : r.chg_pct;
     return `<tr><td>${max + i + 1}</td><td><b>${esc(r.sym)}</b></td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
       <td class="${c >= 0 ? "up" : "dn"}">${c >= 0 ? "+" : ""}${fmt(c,1)}%</td><td><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span></td>
       <td>${fmt(r.entry)}</td><td>${fmt(r.stop)}</td><td>${fmt(r.rel_vol,1)}x</td>
@@ -434,7 +445,7 @@ $("mOk").onclick = () => { if (modalCb) modalCb(); $("modal").hidden = true; mod
 document.addEventListener("keydown", e => { if (!$("modal").hidden && e.key === "Escape") $("mCancel").click(); if (!$("modal").hidden && e.key === "Enter") $("mOk").click(); });
 
 function openIn(sym){
-  const r = rowFor(sym) || { sym, price: live[sym]?.p };
+  const r = rowFor(sym) || { sym, price: quoteFor(sym)?.p };
   const risk = +store.get("risk", "200") || 200;
   const entry = r.entry || r.price, stop = r.stop || r2(entry * 0.97), R = entry - stop;
   openModal(`I'm in ${sym}`, [
@@ -493,7 +504,7 @@ document.addEventListener("click", e => {
 });
 
 function posCard(p){
-  const row = rowFor(p.sym), L = live[p.sym];
+  const row = rowFor(p.sym), L = quoteFor(p.sym);
   const price = L ? L.p : (row?.price ?? p.last); p.last = price;
   const R = p.entry - p.stop0, open = p.shares - p.sold;
   const total = p.realized + (price - p.entry) * open, rNow = R > 0 ? total / (R * p.shares) : 0;
@@ -528,8 +539,8 @@ function posCard(p){
     alertOnce(p.sym + "|time|" + todayCT(), `${p.sym}: 14:45 time check`, "Close or set an overnight stop."); }
   return `<article class="pos">
     <div class="top"><div style="min-width:0"><div class="sym">${esc(p.sym)}</div><div class="nm">${p.shares.toLocaleString()} sh @ ${fmt(p.entry, p.entry < 10 ? 3 : 2)} · stop ${fmt(p.stop)}${p.half ? " · half sold" : ""}</div></div>
-      <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div>${L ? `<div class="live">LIVE</div>` : `<div class="live" style="color:var(--bad)">STALE</div>`}</div></div>
-    ${L ? "" : `<div class="next warn">No live quote: P&amp;L is from the last scan${row ? "" : " this name appeared in, and may be far off"}. Paste your Finnhub key in Settings.</div>`}
+      <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div>${L?.src === "live" ? `<div class="live">LIVE</div>` : L ? `<div class="live" style="color:var(--muted)">~1 MIN</div>` : `<div class="live" style="color:var(--bad)">STALE</div>`}</div></div>
+    ${L ? "" : `<div class="next warn">No current quote: P&amp;L is from the last scan${row ? "" : " this name appeared in, and may be far off"}. Tap the live-quote pill at the top to set your Finnhub key.</div>`}
     <div class="pnl ${total >= 0 ? "up" : "dn"}">${fmtUSD(total)}<small>${rNow >= 0 ? "+" : ""}${fmt(rNow, 2)}R</small></div>
     <div class="orders">${orders.map(([t, tag]) => `<div class="order"><span>${t}</span><span class="tag">${esc(tag)}</span></div>`).join("")}</div>
     <div class="next ${cls}">${next}</div>
@@ -545,7 +556,7 @@ function dayPnl(){
   const realized = closedToday.reduce((s, c) => s + c.pnl, 0);
   let open = 0;
   for (const p of Object.values(positions)) {
-    const L = live[p.sym], row = (scan?.survivors || []).find(x => x.sym === p.sym);
+    const L = quoteFor(p.sym), row = (scan?.survivors || []).find(x => x.sym === p.sym);
     const px = L ? L.p : (row?.price ?? p.last ?? p.entry);
     open += p.realized + (px - p.entry) * (p.shares - p.sold);
   }
@@ -553,7 +564,7 @@ function dayPnl(){
   // Loss if every working stop fills from here (risk still on the table).
   let atRisk = 0;
   for (const p of Object.values(positions)) {
-    const L = live[p.sym], row = (scan?.survivors || []).find(x => x.sym === p.sym);
+    const L = quoteFor(p.sym), row = (scan?.survivors || []).find(x => x.sym === p.sym);
     const px = L ? L.p : (row?.price ?? p.last ?? p.entry);
     atRisk += Math.max(0, (px - p.stop) * (p.shares - p.sold));
   }
@@ -581,7 +592,7 @@ function renderFresh(){
   $("freshWrap").hidden = !rows.length;
   $("freshN").textContent = rows.length ? `· ${rows.length}` : "";
   $("fresh").innerHTML = rows.map(x => {
-    const L = live[x.sym], row = (scan.survivors || []).find(r => r.sym === x.sym), p = L ? L.p : row?.price;
+    const L = quoteFor(x.sym), row = (scan.survivors || []).find(r => r.sym === x.sym), p = L ? L.p : row?.price;
     const late = !x.prime;
     return `<tr style="${late ? "opacity:.55" : ""}"><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b></td><td><span class="chip ${esc(x.setup)}">${esc(x.setup)}</span>${late ? ' <span class="chip LATE">LATE</span>' : ""}</td>
       <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(x.t1)}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td><td><span class="st ${esc(x.status)}">${esc(x.status)}</span></td></tr>`;
@@ -613,6 +624,8 @@ function renderScore(){
   const pct = x => x == null ? "—" : Math.round(x * 100) + "%";
   const rows = Object.entries(g).filter(([, v]) => v.n).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.n}</td><td>${pct(v.win_rate)}</td>
       <td class="${v.avg_r_full >= 0 ? "up" : "dn"}">${fmt(v.avg_r_full, 2)}R</td><td class="${v.avg_r_split >= 0 ? "up" : "dn"}">${fmt(v.avg_r_split, 2)}R</td>
+      <td class="${(v.avg_r_1r ?? 0) >= 0 ? "up" : "dn"}">${v.avg_r_1r == null ? "—" : fmt(v.avg_r_1r, 2) + "R"}${v.n_1r && v.n_1r < v.n ? `<small> (${v.n_1r})</small>` : ""}</td>
+      <td>${v.avg_mfe_r == null ? "—" : fmt(v.avg_mfe_r, 2) + "R"}</td>
       <td class="${v.avg_r_split >= 0 ? "up" : "dn"}">${fmtUSD(v.avg_r_split * risk)}</td></tr>`).join("");
   const tRows = today.map(x => {
     const r = x.r_split ?? x.mark_r;
@@ -622,7 +635,7 @@ function renderScore(){
   }).join("");
   $("score").innerHTML = `<p class="lead">${all.n} scored signal${all.n === 1 ? "" : "s"} over ${st.days || 0} trading day${st.days === 1 ? "" : "s"}${st.since ? " since " + esc(st.since) : ""}${st.no_fill ? ` · ${st.no_fill} never traded through entry` : ""}.
       Scored mechanically from 5-minute bars, before slippage. Dollar column = average R × your $${risk} risk. Treat it as noise until there are 30+ signals.</p>
-    ${rows ? `<div class="tbl"><table><thead><tr><th>Group</th><th>Signals</th><th>Win</th><th>Avg R, all at T1</th><th>Avg R, split exit</th><th>$/trade</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+    ${rows ? `<div class="tbl"><table><thead><tr><th>Group</th><th>Signals</th><th>Win</th><th>Avg R, all at T1</th><th>Avg R, split exit</th><th>Avg R, half at +1R</th><th>Avg best move</th><th>$/trade</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
     ${tRows ? `<h2 style="margin-top:16px">Today's signals</h2><div class="tbl"><table><thead><tr><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry</th><th>Stop</th><th>T1</th><th>Status</th><th>R</th><th>When</th></tr></thead><tbody>${tRows}</tbody></table></div>` : ""}`;
 }
 

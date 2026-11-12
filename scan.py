@@ -43,7 +43,7 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
-LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 120))
+LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 60))
 RUN_MINUTES = int(os.environ.get("RUN_MINUTES", 350))
 END_CT_HHMM = (16, 15)      # stop at 16:15 CT year-round (DST-aware)
 ONE_SHOT = os.environ.get("ONE_SHOT") == "1"
@@ -69,6 +69,20 @@ WARN_WORDS = {
     "minimum bid": "Delisting risk", "nasdaq notice": "Delisting risk",
     "downgrade": "Downgrade",
 }
+OTC_EXCH = re.compile(r"otc|pink|pnk|oqb|oqx|other", re.I)
+# Recaps of a move that already happened ("Why X stock rocketed today") are not new news.
+RECAP_WHY = re.compile(r"\bwhy\b.*\b(stock|shares)\b|here'?s why", re.I)
+RECAP_MOVE = re.compile(
+    r"\b(stock|shares)\b[^.]{0,30}\b(soar|rocket|jump|surg|skyrocket|pop|rall|climb|spik|is up|are up|higher)\w*", re.I)
+
+
+def is_recap(n):
+    """A 'why it moved' story, or a move story from before today: describes a move, isn't the catalyst."""
+    head = n.get("headline", "")
+    if RECAP_WHY.search(head):
+        return True
+    start = dt.datetime.combine(dt.datetime.now(ET).date(), dt.time(0, 0), ET).timestamp()
+    return bool(RECAP_MOVE.search(head)) and n.get("datetime", 0) < start
 ROUNDUP = re.compile(
     r"movers|stocks moving|gainers|losers|most active|unusual volume|top stocks|"
     r"premarket|pre-market|mid-day|midday|after-hours|session top|shares are trading|"
@@ -186,6 +200,8 @@ def build_universe():
         s = q.get("symbol")
         if not s or s in seen or q.get("quoteType") not in (None, "EQUITY"):
             continue
+        if OTC_EXCH.search(str(q.get("fullExchangeName") or q.get("exchange") or "")):
+            continue  # OTC ADRs barely trade and crowd real movers out of the bar budget
         seen.add(s)
         prev_close = q.get("regularMarketPreviousClose")
         reg = q.get("regularMarketPrice")
@@ -528,9 +544,12 @@ def check_news(row):
     # Headlines that name the company outrank ones that only mention it in the summary.
     specific.sort(key=lambda n: (not about_company({"headline": n.get("headline", "")}, row),
                                  -n.get("datetime", 0)))
-    cat, bad, warns = None, None, set()
+    cat, bad, recap, warns = None, None, None, set()
     for n in specific:
         head = n.get("headline", "")
+        if is_recap(n):
+            recap = recap or n
+            continue
         text = (head + " " + n.get("summary", "")[:300]).lower()
         for w, label in WARN_WORDS.items():
             if w in text:
@@ -552,6 +571,11 @@ def check_news(row):
         row["catalyst_type"] = catalyst_type(bad.get("headline", ""))
         row["catalyst_strength"] = "negative"
         warns.add("Bad-news headline")
+    elif recap is not None:
+        cat = recap
+        row["catalyst_type"] = "Recap"
+        row["catalyst_strength"] = "weak"
+        warns.add("Recap of a past move, not new news")
     elif specific:
         cat = specific[0]
         row["catalyst_type"] = "Other"
@@ -698,6 +722,7 @@ def log_new_signals(survivors):
     cutoff = time.time() - RESIGNAL_MIN * 60
     recent = {(x["sym"], x["setup"]) for x in sigs if x["date"] == today and x.get("ts", 0) >= cutoff}
     orb_today = {(x["sym"], x["setup"]) for x in sigs if x["date"] == today and x["setup"] == "ORB-TRIGGER"}
+    signalled = {x["sym"] for x in sigs if x["date"] == today}
     for r in survivors:
         if r.get("setup") not in SIGNAL_SETUPS or not r.get("entry") or not r.get("stop"):
             continue
@@ -720,11 +745,14 @@ def log_new_signals(survivors):
             "vol_pace": r.get("vol_pace"), "room_r": r.get("room_r"),
             "status": "pending",
         }
+        sig["repeat"] = r["sym"] in signalled   # later signals on a name already flagged today: logged, not pushed
         sigs.append(sig)
         recent.add((r["sym"], r["setup"]))
+        signalled.add(r["sym"])
         if r["setup"] == "ORB-TRIGGER":
             orb_today.add((r["sym"], "ORB-TRIGGER"))
-        push_signal(sig, r)
+        if not sig["repeat"]:
+            push_signal(sig, r)
 
 
 def push_signal(sig, r):
@@ -755,6 +783,49 @@ def _r_mult(sig, price):
     return round((price - sig["entry"]) / risk, 2) if risk > 0 else 0.0
 
 
+def shadow_1r(sig, bars):
+    """Comparison exit plan, recorded but not traded: sell half at +1R, stop the rest at
+    breakeven, rest out at T2 (3R) or the 14:45 CT time stop. Also records MFE in R."""
+    entry, stop = sig["entry"], sig["stop"]
+    R = entry - stop
+    if R <= 0:
+        return
+    t2 = sig.get("t2") or entry + 3 * R
+    filled, half, mfe = False, False, None
+    for ts, b in bars.iterrows():
+        hi, lo, cl = float(b["High"]), float(b["Low"]), float(b["Close"])
+        if not filled:
+            if hi < entry:
+                continue
+            filled = True
+            if lo <= stop:
+                sig["r_1r"], sig["mfe_r"] = -1.0, round(max(0.0, (hi - entry) / R), 2)
+                return
+        mfe = max(mfe or 0.0, (hi - entry) / R)
+        if ts.time() >= TIME_STOP_ET:
+            rest = (cl - entry) / R
+            sig["r_1r"] = round(0.5 + 0.5 * rest, 2) if half else round(rest, 2)
+            break
+        if not half:
+            if lo <= stop:
+                sig["r_1r"] = -1.0
+                break
+            if hi >= entry + R:
+                half = True
+                if hi >= t2:
+                    sig["r_1r"] = round(0.5 + 0.5 * (t2 - entry) / R, 2)
+                    break
+            continue
+        if lo <= entry:
+            sig["r_1r"] = 0.5
+            break
+        if hi >= t2:
+            sig["r_1r"] = round(0.5 + 0.5 * (t2 - entry) / R, 2)
+            break
+    if mfe is not None:
+        sig["mfe_r"] = round(mfe, 2)
+
+
 def resolve_signal(sig, df):
     """Walk 5m bars after the signal. Conservative: if one bar touches both stop and
     target, the stop is assumed to have hit first."""
@@ -762,6 +833,10 @@ def resolve_signal(sig, df):
     bars = df[df.index >= sig_ts - dt.timedelta(minutes=5)]
     if bars.empty:
         return
+    try:
+        shadow_1r(sig, bars)
+    except Exception:
+        pass
     entry, stop = sig["entry"], sig["stop"]
     t1 = sig.get("t1") or entry + 2 * (entry - stop)
     t2 = sig.get("t2") or entry + 3 * (entry - stop)
@@ -866,9 +941,13 @@ def signal_stats():
             return {"n": 0}
         rf = [x["r_full"] for x in rows]
         rs = [x["r_split"] for x in rows]
+        r1 = [x["r_1r"] for x in rows if x.get("r_1r") is not None]
+        mf = [x["mfe_r"] for x in rows if x.get("mfe_r") is not None]
         return {"n": len(rows), "win_rate": round(sum(1 for r in rf if r > 0) / len(rows), 3),
                 "avg_r_full": round(sum(rf) / len(rows), 2), "avg_r_split": round(sum(rs) / len(rows), 2),
-                "total_r_full": round(sum(rf), 2), "total_r_split": round(sum(rs), 2)}
+                "total_r_full": round(sum(rf), 2), "total_r_split": round(sum(rs), 2),
+                "avg_r_1r": round(sum(r1) / len(r1), 2) if r1 else None, "n_1r": len(r1),
+                "avg_mfe_r": round(sum(mf) / len(mf), 2) if mf else None}
 
     clean = lambda x: x.get("catalyst_strength") in ("strong", "squeeze") and not x.get("bad_headline")
     groups = {
@@ -881,6 +960,10 @@ def signal_stats():
         "after 10:30 CT": [x for x in done if not x.get("prime")],
         "clean catalyst": [x for x in done if clean(x)],
         "A-TRIGGER + prime + clean": [x for x in done if x["setup"] == "A-TRIGGER" and x.get("prime") and clean(x)],
+        "rel vol >= 1.5 at signal": [x for x in done if (x.get("rel_vol") or 0) >= 1.5],
+        "rel vol < 1.5 at signal": [x for x in done if (x.get("rel_vol") or 0) < 1.5],
+        "first signal on the name": [x for x in done if not x.get("repeat")],
+        "repeat signal on the name": [x for x in done if x.get("repeat")],
     }
     all_sigs = load_signals()
     return {
@@ -917,6 +1000,34 @@ def publish(payload):
         if p.returncode != 0:
             log(f"git step failed: {c.split(' x-access')[0][:40]} :: {p.stderr[:200]}")
             return
+
+
+_quote_cache = {}
+
+
+def fetch_quotes(syms):
+    """Finnhub quotes for names signalled today, so the page's position cards never freeze
+    at an old scan price when a browser has no key. Cached 45s; ~25 names max."""
+    out = {}
+    if not FINNHUB_KEY:
+        return out
+    for s in list(syms)[:25]:
+        hit = _quote_cache.get(s)
+        if hit and time.time() - hit["t"] < 45:
+            out[s] = hit
+            continue
+        try:
+            r = requests.get("https://finnhub.io/api/v1/quote", params={"symbol": s, "token": FINNHUB_KEY}, timeout=8)
+            if r.status_code == 200:
+                q = r.json()
+                if q.get("c"):
+                    _quote_cache[s] = out[s] = {"p": q["c"], "h": q.get("h"), "t": time.time()}
+            elif r.status_code == 429:
+                break
+        except Exception:
+            pass
+        time.sleep(0.3)
+    return out
 
 
 def one_loop():
@@ -965,8 +1076,15 @@ def one_loop():
     except Exception as e:
         _state["errors"].append(f"scoreboard: {e!r}"[:200])
         signals_today, stats = [], {}
+    quotes = {}
+    if session == "REGULAR":
+        try:
+            quotes = fetch_quotes(sorted({x["sym"] for x in signals_today}))
+        except Exception as e:
+            _state["errors"].append(f"quotes: {e!r}"[:150])
     now = dt.datetime.now(dt.timezone.utc)
     payload = {
+        "quotes": quotes,
         "updated_utc": now.isoformat(timespec="seconds"),
         "updated_ct": now.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S CT"),
         "session": session,
