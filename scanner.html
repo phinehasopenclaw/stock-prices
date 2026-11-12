@@ -544,7 +544,7 @@ function renderPnl(){
   const msg = d.total <= LOSS_STOP ? "Rule 9: down $400. Done for the day. Flat and finished."
     : d.total >= WIN_DONE ? "Rule 9: up $1,200. Done for the day. Flat and finished."
     : d.total <= LOSS_HALF ? "Down one full risk. Half size only from here; $400 is the hard stop."
-    : `Room before the $400 loss limit: <b>${fmtUSD(d.total - LOSS_STOP)}</b>`;
+    : `Stop at −$400: <b>$${Math.round(d.total - LOSS_STOP).toLocaleString("en-US")}</b> of loss room · Done at +$1,200: <b>$${Math.round(WIN_DONE - d.total).toLocaleString("en-US")}</b> to go`;
   el.innerHTML = `<span>Day P&amp;L <b>${fmtUSD(d.total)}</b></span><span class="m">closed ${fmtUSD(d.realized)} · open ${fmtUSD(d.open)}${d.other ? " · other " + fmtUSD(d.other) : ""}</span>
     <span>${msg}</span><button type="button" id="otherBtn">Add untracked P&amp;L</button>`;
   $("otherBtn").onclick = () => openModal("Untracked P&L today", [{ k: "v", label: "Closed P&L from trades not tracked here ($, loss is negative)", v: d.other }],
