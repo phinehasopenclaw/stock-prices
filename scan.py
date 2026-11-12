@@ -589,6 +589,12 @@ def apply_filter(r, session=None):
     r["dollar_vol"] = int(dollar_vol)
     tiny_float = flt is not None and flt < FLOAT_MIN
     dv_min = PM_DOLLAR_MIN if session == "PRE" else DOLLAR_VOL_MIN
+    if session == "PRE" and not r.get("cum_vol"):
+        # Yahoo often omits pre-market volume. Judge by the name's normal day instead:
+        # a stock that usually trades $3M+ will be exitable at the open.
+        dollar_vol = (r.get("avg_vol") or 0) * (r.get("price") or 0)
+        dv_min = DOLLAR_VOL_MIN
+        r["liquidity_basis"] = "avg daily $ (pre-market volume not reported)"
     liquid_ok = (not tiny_float) and dollar_vol >= dv_min and (
         (r.get("mcap") or 0) >= MCAP_MIN or (rel or 0) >= 1.0)
     r["filter"] = {"catalyst": bool(catalyst_ok or squeeze), "holding": holding_ok, "liquidity": liquid_ok}
