@@ -48,6 +48,8 @@ MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 60))
+FLOW_MIN = 5.0      # intraday: minute-to-minute volume vs normal per-minute volume that pulls a name in
+FLOW_SLOTS = 10     # bar-analysis slots kept for intraday flow movers
 PUSH_MIN_RV = 1.5   # phone push only when relative volume is 1.5x or more (Nov 13 scoreboard)
 # Armed levels: names whose entry is known before the break get watched on 1-minute bars every
 # WATCH_SECONDS, so the signal fires at the break instead of after a finished 5-minute bar
@@ -199,7 +201,9 @@ def build_universe():
                "POST": "POST", "POSTPOST": "CLOSED", "CLOSED": "CLOSED"}.get(state, state)
 
     if session == "REGULAR":
-        quotes = first + screener_pages("percentchange", 2, session)
+        # Top 1,000 by volume plus the top 500 gainers: wide enough to see liquid names that
+        # turn and run before they're up big on the day (VKTX Nov 13).
+        quotes = first + screener_pages("dayvolume", 4, session)[250:] + screener_pages("percentchange", 2, session)
     else:
         # Before the open, percent-change sorting is yesterday's; sweep wide.
         quotes = first + screener_pages("dayvolume", 11, session)[250:]
@@ -248,6 +252,8 @@ def build_universe():
             "avg_vol": q.get("averageDailyVolume3Month") or q.get("averageDailyVolume10Day"),
             "day_vol": q.get("regularMarketVolume"),
             "pm_vol": q.get("preMarketVolume"),
+            "open": q.get("regularMarketOpen"),
+            "day_low": q.get("regularMarketDayLow"),
             "exchange": q.get("fullExchangeName") or q.get("exchange"),
         })
     _state["universe_size"] = len(rows)
@@ -622,6 +628,12 @@ def apply_filter(r, session=None):
     catalyst_ok = r.get("catalyst_strength") in ("strong", "analyst") or (
         low_float and (rel or 0) >= 1.0 and r.get("catalyst_strength") == "weak")
     squeeze = low_float and (rel or 0) >= 2.0
+    if r.get("flow_mover") and not catalyst_ok and r.get("catalyst_strength") != "negative":
+        catalyst_ok = True   # the volume burst is the evidence; flagged below so it's verified by hand
+        r["catalyst_strength"] = "flow"
+        w = list(r.get("warnings") or [])
+        w.append(f"Intraday volume burst {r.get('flow_x')}x normal, no news found: check before entry")
+        r["warnings"] = w
     holding_ok = r.get("setup") not in ("FADING", "NO DATA", "THIN")
     flt = r.get("float")
     dollar_vol = (r.get("cum_vol") or 0) * (r.get("price") or 0)
@@ -766,7 +778,9 @@ def log_new_signals(survivors):
         signalled.add(r["sym"])
         if r["setup"] == "ORB-TRIGGER":
             orb_today.add((r["sym"], "ORB-TRIGGER"))
-        if not sig["repeat"] and (r.get("rel_vol") or 0) >= PUSH_MIN_RV:
+        sig["flow_mover"] = bool(r.get("flow_mover"))
+        sig["flow_x"] = r.get("flow_x")
+        if not sig["repeat"] and (r.get("rel_vol") or 0) >= PUSH_MIN_RV and r.get("catalyst_strength") != "flow":
             push_signal(sig, r)   # low-volume triggers are still logged and scored, just not pushed
 
 
@@ -970,6 +984,7 @@ def signal_stats():
         "ORB-TRIGGER": [x for x in done if x["setup"] == "ORB-TRIGGER"],
         "IGNITION": [x for x in done if x["setup"] == "IGNITION"],
         "BREAK (armed level)": [x for x in done if x["setup"] == "BREAK"],
+        "intraday flow mover": [x for x in done if x.get("flow_mover")],
         "A-TRIGGER": [x for x in done if x["setup"] == "A-TRIGGER"],
         "B-BREAKOUT": [x for x in done if x["setup"] == "B-BREAKOUT"],
         "prime (before 10:30 CT)": [x for x in done if x.get("prime")],
@@ -1109,7 +1124,7 @@ def archive_prune():
 
 
 def board_line(session, survivors):
-    keys = ("sym", "price", "chg_pct", "setup", "entry", "stop", "t1", "t2", "vwap", "sess_high",
+    keys = ("sym", "price", "chg_pct", "flow_x", "flow_mover", "setup", "entry", "stop", "t1", "t2", "vwap", "sess_high",
             "rel_vol", "vol_surge", "vol_pace", "room_r", "ext_pct", "catalyst_type", "catalyst_strength", "late")
     return {"t": dt.datetime.now(CT).strftime("%H:%M:%S"), "session": session,
             "armed": sorted(_armed), "rows": [{k: r.get(k) for k in keys} for r in survivors[:25]]}
@@ -1213,7 +1228,7 @@ def arm_levels(session, survivors):
         for r in survivors:
             if (r.get("setup") in ARM_SETUPS and r.get("entry") and r.get("stop")
                     and r["entry"] > r["stop"] and (r.get("rel_vol") or 0) >= ARM_MIN_RV
-                    and not r.get("bad_headline")):
+                    and not r.get("bad_headline") and r.get("catalyst_strength") != "flow"):
                 R = r["entry"] - r["stop"]
                 armed[r["sym"]] = {
                     "sym": r["sym"], "setup": r["setup"], "entry": r["entry"], "stop": r["stop"],
@@ -1304,6 +1319,36 @@ def watch_armed():
             log(f"watcher error: {e!r}")
 
 
+_flow_hist = {}   # sym -> list of (time, day_vol, price), last few loops
+
+
+def mark_flow(rows):
+    """Volume flow between loops: a liquid name suddenly trading many times its normal
+    per-minute volume while rising gets pulled into analysis even if it's not up 5% yet."""
+    now = time.time()
+    flow = []
+    for r in rows:
+        dv, av, px = r.get("day_vol"), r.get("avg_vol"), r.get("price")
+        if not (dv and av and px):
+            continue
+        h = _flow_hist.setdefault(r["sym"], [])
+        prev = h[-1] if h else None
+        if prev and 30 <= now - prev[0] <= 600 and dv >= prev[1]:
+            per_min = (dv - prev[1]) / ((now - prev[0]) / 60)
+            r["flow_x"] = round(per_min / (av / 390), 1)
+            ref = next((x for x in h if now - x[0] <= 360), h[0])   # price ~3-6 min ago
+            r["flow_rising"] = px > ref[2]
+        h.append((now, dv, px))
+        del h[:-8]
+        green = (r.get("open") and px >= r["open"]) or (r.get("day_low") and px >= r["day_low"] * 1.03)
+        if ((r.get("flow_x") or 0) >= FLOW_MIN and r.get("flow_rising") and green
+                and (r.get("chg_pct") or 0) > -3 and (r.get("chg_pct") or 0) < GAP_MIN):
+            r["flow_mover"] = True
+            flow.append(r)
+    flow.sort(key=lambda r: -r["flow_x"])
+    return flow
+
+
 def one_loop():
     _state["loop"] += 1
     _state["errors"] = []
@@ -1312,7 +1357,10 @@ def one_loop():
     movers = [r for r in rows
               if (r["chg_pct"] or 0) >= GAP_MIN and PRICE_MIN <= r["price"] <= PRICE_MAX]
     movers.sort(key=lambda r: -r["chg_pct"])
-    top = movers[:MAX_BAR_NAMES]
+    flow = mark_flow(rows) if session == "REGULAR" else []
+    flow = [r for r in flow if PRICE_MIN <= r["price"] <= PRICE_MAX][:FLOW_SLOTS]
+    top = movers[:MAX_BAR_NAMES - len(flow)] + flow
+    movers = movers + flow
     fetch_bars(top, session)
     for r in top:
         if session == "PRE":
