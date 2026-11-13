@@ -1078,14 +1078,22 @@ def archive_restore():
     if TOKEN:
         h["Authorization"] = f"Bearer {TOKEN}"
     day = today_ct()
-    for name in ("board.jsonl", "breaks.jsonl", "done"):
+    need = {"board.jsonl": "session", "breaks.jsonl": "result"}   # a real line always has this key
+    for name, key in need.items():
         try:
             r = requests.get(f"https://api.github.com/repos/{REPO}/contents/archive/{day}/{name}?ref=scan-data",
                              headers=h, timeout=30)
             if r.status_code == 200:
-                with open(os.path.join(archive_dir(day), name), "wb") as f:
-                    f.write(r.content)
-                log(f"restored archive/{day}/{name} ({len(r.content)} bytes)")
+                keep = []
+                for line in r.content.decode("utf-8", "ignore").splitlines():
+                    try:
+                        if key in json.loads(line):
+                            keep.append(line)
+                    except Exception:
+                        pass
+                with open(os.path.join(archive_dir(day), name), "w") as f:
+                    f.write("".join(x + "\n" for x in keep))
+                log(f"restored archive/{day}/{name} ({len(keep)} lines)")
         except Exception as e:
             log(f"archive restore {name} failed: {e!r}")
 
@@ -1395,6 +1403,7 @@ def relay():
 
 def main():
     start = time.time()
+    subprocess.run(["rm", "-rf", os.path.join(OUT_DIR, "archive")])   # start clean; today's files come back via restore
     archive_restore()
     archive_prune()
     threading.Thread(target=watch_armed, daemon=True).start()
