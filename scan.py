@@ -1261,9 +1261,14 @@ def watch_armed():
                 price, hi = float(last["Close"]), float(last["High"])
                 if hi < a["entry"]:
                     continue
-                vols = df["Volume"].iloc[-21:-1]
-                base = float(vols.median()) if len(vols) else 0.0
-                vol_x = float(last["Volume"]) / base if base > 0 else None
+                # Yahoo reports 0 volume for the minute still forming, so judge the break on the
+                # larger of the forming and last completed minute, against the 20 minutes before them.
+                v = df["Volume"].fillna(0)
+                cur = max(float(v.iloc[-1]), float(v.iloc[-2]))
+                prior = v.iloc[-22:-2]
+                prior = prior[prior > 0]
+                base = float(prior.median()) if len(prior) else 0.0
+                vol_x = cur / base if base > 0 else None
                 R = a["entry"] - a["stop"]
                 past_r = (price - a["entry"]) / R if R > 0 else 0
                 fired.add(key)
