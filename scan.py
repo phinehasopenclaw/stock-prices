@@ -1346,6 +1346,10 @@ def mark_flow(rows):
             r["flow_mover"] = True
             flow.append(r)
     flow.sort(key=lambda r: -r["flow_x"])
+    leaders = sorted((r for r in rows if r.get("flow_x") is not None), key=lambda r: -r["flow_x"])[:10]
+    _state["flow_top"] = [{"sym": r["sym"], "flow_x": r["flow_x"], "chg_pct": fnum(r.get("chg_pct"), 2),
+                           "price": r.get("price"), "rising": r.get("flow_rising")} for r in leaders]
+    _state["flow_measured"] = sum(1 for r in rows if r.get("flow_x") is not None)
     return flow
 
 
@@ -1410,6 +1414,8 @@ def one_loop():
             _state["errors"].append(f"quotes: {e!r}"[:150])
     now = dt.datetime.now(dt.timezone.utc)
     payload = {
+        "flow_top": _state.get("flow_top", []),
+        "flow_measured": _state.get("flow_measured", 0),
         "armed": armed_out,
         "quotes": quotes,
         "updated_utc": now.isoformat(timespec="seconds"),
