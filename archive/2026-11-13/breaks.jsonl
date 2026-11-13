@@ -1,0 +1,72 @@
+{"t":"10:44:13","sym":"STN","armed_from":"B-WATCH","entry":87.18,"stop":86.32,"price":87.19999694824219,"past_r":0.02,"bar_vol_x":null,"result":"BREAK"}
+{"t":"10:56:21","sym":"HAWK","armed_from":"A-WATCH","entry":17.46,"stop":17.22,"price":17.489999771118164,"past_r":0.12,"bar_vol_x":0.6,"result":"BREAK"}
+{"t":"10:56:51","sym":"WWW","armed_from":"B-WATCH","entry":24.43,"stop":23.87,"price":24.43000030517578,"past_r":0.0,"bar_vol_x":2.15,"result":"BREAK"}
+{"t":"10:57:06","sym":"QVCG","armed_from":"A-WATCH","entry":8.28,"stop":8.16,"price":8.300000190734863,"past_r":0.17,"bar_vol_x":1.82,"result":"BREAK"}
+{"t":"10:58:08","sym":"WWW","armed_from":"B-WATCH","entry":24.44,"stop":23.87,"price":24.454999923706055,"past_r":0.03,"bar_vol_x":2.15,"result":"BREAK"}
+{"t":"11:04:43","sym":"STN","armed_from":"B-WATCH","entry":87.22,"stop":86.3,"price":87.26000213623047,"past_r":0.04,"bar_vol_x":3.73,"result":"BREAK"}
+{"t":"11:06:15","sym":"QVCG","armed_from":"A-WATCH","entry":8.3,"stop":8.16,"price":8.34000015258789,"past_r":0.29,"bar_vol_x":1.38,"result":"BREAK"}
+{"t":"11:18:53","sym":"HAWK","armed_from":"A-WATCH","entry":17.26,"stop":17.04,"price":17.260000228881836,"past_r":0.0,"bar_vol_x":0.81,"result":"BREAK"}
+{"t":"11:28:23","sym":"QVCG","armed_from":"A-WATCH","entry":8.33,"stop":8.16,"price":8.345000267028809,"past_r":0.09,"bar_vol_x":0.16,"result":"BREAK"}
+{"t":"11:32:51","sym":"GLAS","armed_from":"A-WATCH","entry":1.29,"stop":1.25,"price":1.2949999570846558,"past_r":0.12,"bar_vol_x":14.33,"result":"BREAK"}
+{"t":"11:36:39","sym":"MRLN","armed_from":"A-WATCH","entry":1.21,"stop":1.14,"price":1.2100000381469727,"past_r":0.0,"bar_vol_x":2.67,"result":"BREAK"}
+{"t":"11:47:00","sym":"SBC","armed_from":"B-WATCH","entry":7.01,"stop":6.87,"price":7.050000190734863,"past_r":0.29,"bar_vol_x":2.05,"result":"BREAK"}
+{"t":"11:48:31","sym":"MRLN","armed_from":"A-WATCH","entry":1.23,"stop":1.14,"price":1.2300000190734863,"past_r":0.0,"bar_vol_x":0.35,"result":"BREAK"}
+{"t":"11:52:04","sym":"MRLN","armed_from":"A-WATCH","entry":1.24,"stop":1.15,"price":1.2350000143051147,"past_r":-0.06,"bar_vol_x":1.54,"result":"touched and rejected"}
+{"t":"11:58:07","sym":"HAWK","armed_from":"A-WATCH","entry":17.14,"stop":16.79,"price":17.15999984741211,"past_r":0.06,"bar_vol_x":1.65,"result":"BREAK"}
+{"t":"12:00:41","sym":"HAWK","armed_from":"A-WATCH","entry":17.2,"stop":16.79,"price":17.287599563598633,"past_r":0.21,"bar_vol_x":1.47,"result":"BREAK"}
+{"t":"12:06:45","sym":"SBC","armed_from":"B-WATCH","entry":7.1,"stop":6.92,"price":7.105000019073486,"past_r":0.03,"bar_vol_x":0.36,"result":"BREAK"}
+{"t":"12:06:45","sym":"WWW","armed_from":"B-WATCH","entry":24.62,"stop":24.35,"price":24.625,"past_r":0.02,"bar_vol_x":1.37,"result":"BREAK"}
+{"t":"12:07:01","sym":"SBC","armed_from":"B-WATCH","entry":7.13,"stop":6.92,"price":7.135000228881836,"past_r":0.02,"bar_vol_x":0.36,"result":"BREAK"}
+{"t":"12:09:33","sym":"HAWK","armed_from":"A-WATCH","entry":17.31,"stop":16.79,"price":17.329999923706055,"past_r":0.04,"bar_vol_x":0.13,"result":"BREAK"}
+{"t":"12:10:48","sym":"HAWK","armed_from":"A-WATCH","entry":17.34,"stop":16.87,"price":17.34000015258789,"past_r":0.0,"bar_vol_x":0.62,"result":"BREAK"}
+{"t":"12:10:48","sym":"MRLN","armed_from":"A-WATCH","entry":1.25,"stop":1.2,"price":1.25,"past_r":0.0,"bar_vol_x":0.55,"result":"BREAK"}
+{"t":"12:14:37","sym":"WWW","armed_from":"B-WATCH","entry":24.66,"stop":24.36,"price":24.68000030517578,"past_r":0.07,"bar_vol_x":1.37,"result":"BREAK"}
+{"t":"12:15:07","sym":"WWW","armed_from":"B-WATCH","entry":24.69,"stop":24.36,"price":24.700000762939453,"past_r":0.03,"bar_vol_x":0.76,"result":"BREAK"}
+{"t":"12:16:53","sym":"MRLN","armed_from":"A-WATCH","entry":1.26,"stop":1.2,"price":1.2684999704360962,"past_r":0.14,"bar_vol_x":2.6,"result":"BREAK"}
+{"t":"12:21:11","sym":"MRLN","armed_from":"A-WATCH","entry":1.29,"stop":1.21,"price":1.29830002784729,"past_r":0.1,"bar_vol_x":16.4,"result":"BREAK"}
+{"t":"12:26:43","sym":"ENGN","armed_from":"A-WATCH","entry":2.36,"stop":2.28,"price":2.365000009536743,"past_r":0.06,"bar_vol_x":39.71,"result":"BREAK"}
+{"t":"12:26:43","sym":"HAWK","armed_from":"A-WATCH","entry":17.24,"stop":16.95,"price":17.25,"past_r":0.03,"bar_vol_x":3.32,"result":"BREAK"}
+{"t":"12:33:49","sym":"HAWK","armed_from":"A-WATCH","entry":17.3,"stop":16.97,"price":17.315000534057617,"past_r":0.05,"bar_vol_x":0.44,"result":"BREAK"}
+{"t":"12:34:50","sym":"PUBM","armed_from":"B-WATCH","entry":20.67,"stop":20.22,"price":20.684999465942383,"past_r":0.03,"bar_vol_x":0.55,"result":"BREAK"}
+{"t":"12:35:36","sym":"PUBM","armed_from":"B-WATCH","entry":20.68,"stop":20.43,"price":20.68000030517578,"past_r":0.0,"bar_vol_x":3.22,"result":"BREAK"}
+{"t":"12:36:06","sym":"PUBM","armed_from":"B-WATCH","entry":20.69,"stop":20.43,"price":20.690000534057617,"past_r":0.0,"bar_vol_x":0.73,"result":"BREAK"}
+{"t":"12:36:21","sym":"PUBM","armed_from":"B-WATCH","entry":20.7,"stop":20.43,"price":20.704999923706055,"past_r":0.02,"bar_vol_x":0.73,"result":"BREAK"}
+{"t":"12:37:07","sym":"PUBM","armed_from":"B-WATCH","entry":20.73,"stop":20.43,"price":20.739999771118164,"past_r":0.03,"bar_vol_x":2.35,"result":"BREAK"}
+{"t":"12:37:52","sym":"PUBM","armed_from":"B-WATCH","entry":20.75,"stop":20.43,"price":20.770000457763672,"past_r":0.06,"bar_vol_x":2.35,"result":"BREAK"}
+{"t":"12:38:22","sym":"PUBM","armed_from":"B-WATCH","entry":20.78,"stop":20.43,"price":20.809999465942383,"past_r":0.09,"bar_vol_x":4.33,"result":"BREAK"}
+{"t":"12:42:26","sym":"HAWK","armed_from":"A-WATCH","entry":17.36,"stop":16.97,"price":17.360000610351562,"past_r":0.0,"bar_vol_x":0.48,"result":"BREAK"}
+{"t":"12:49:02","sym":"HAWK","armed_from":"A-WATCH","entry":17.41,"stop":16.97,"price":17.3799991607666,"past_r":-0.07,"bar_vol_x":4.16,"result":"touched and rejected"}
+{"t":"12:51:03","sym":"SBC","armed_from":"A-WATCH","entry":6.82,"stop":6.72,"price":6.889999866485596,"past_r":0.7,"bar_vol_x":2.46,"result":"already past chase limit"}
+{"t":"12:52:19","sym":"HAWK","armed_from":"A-WATCH","entry":17.44,"stop":17.01,"price":17.55500030517578,"past_r":0.27,"bar_vol_x":0.85,"result":"BREAK"}
+{"t":"13:02:57","sym":"SBC","armed_from":"A-WATCH","entry":6.86,"stop":6.72,"price":6.86460018157959,"past_r":0.03,"bar_vol_x":2.02,"result":"BREAK"}
+{"t":"13:03:43","sym":"HAWK","armed_from":"A-WATCH","entry":17.53,"stop":17.16,"price":17.540000915527344,"past_r":0.03,"bar_vol_x":3.09,"result":"BREAK"}
+{"t":"13:10:04","sym":"NGEN","armed_from":"A-WATCH","entry":1.85,"stop":1.77,"price":1.8650000095367432,"past_r":0.19,"bar_vol_x":5.55,"result":"BREAK"}
+{"t":"13:17:41","sym":"SBC","armed_from":"A-WATCH","entry":6.73,"stop":6.65,"price":6.752399921417236,"past_r":0.28,"bar_vol_x":0.57,"result":"BREAK"}
+{"t":"13:17:56","sym":"LFTO","armed_from":"A-WATCH","entry":23.09,"stop":22.49,"price":23.209999084472656,"past_r":0.2,"bar_vol_x":0.4,"result":"BREAK"}
+{"t":"13:18:11","sym":"STVN","armed_from":"B-WATCH","entry":15.58,"stop":15.18,"price":15.59000015258789,"past_r":0.03,"bar_vol_x":0.67,"result":"BREAK"}
+{"t":"13:23:30","sym":"STVN","armed_from":"B-WATCH","entry":15.6,"stop":15.33,"price":15.600000381469727,"past_r":0.0,"bar_vol_x":0.47,"result":"BREAK"}
+{"t":"13:24:00","sym":"LFTO","armed_from":"A-WATCH","entry":23.31,"stop":22.49,"price":23.34000015258789,"past_r":0.04,"bar_vol_x":0.96,"result":"BREAK"}
+{"t":"13:24:47","sym":"STVN","armed_from":"B-WATCH","entry":15.61,"stop":15.33,"price":15.619999885559082,"past_r":0.04,"bar_vol_x":2.07,"result":"BREAK"}
+{"t":"13:25:32","sym":"STVN","armed_from":"B-WATCH","entry":15.63,"stop":15.33,"price":15.638199806213379,"past_r":0.03,"bar_vol_x":0.9,"result":"BREAK"}
+{"t":"13:25:47","sym":"SBC","armed_from":"A-WATCH","entry":6.76,"stop":6.65,"price":6.769499778747559,"past_r":0.09,"bar_vol_x":0.11,"result":"BREAK"}
+{"t":"13:26:49","sym":"LFTO","armed_from":"A-WATCH","entry":23.37,"stop":22.49,"price":23.3700008392334,"past_r":0.0,"bar_vol_x":0.89,"result":"BREAK"}
+{"t":"13:30:37","sym":"STVN","armed_from":"B-WATCH","entry":15.66,"stop":15.45,"price":15.729999542236328,"past_r":0.33,"bar_vol_x":2.82,"result":"already past chase limit"}
+{"t":"13:35:41","sym":"LFTO","armed_from":"A-WATCH","entry":23.43,"stop":22.49,"price":23.549999237060547,"past_r":0.13,"bar_vol_x":3.24,"result":"BREAK"}
+{"t":"13:35:56","sym":"ENGN","armed_from":"A-WATCH","entry":2.35,"stop":2.32,"price":2.3550000190734863,"past_r":0.17,"bar_vol_x":1.83,"result":"BREAK"}
+{"t":"13:38:44","sym":"LFTO","armed_from":"A-WATCH","entry":23.85,"stop":22.65,"price":23.8700008392334,"past_r":0.02,"bar_vol_x":3.95,"result":"BREAK"}
+{"t":"13:40:00","sym":"SBC","armed_from":"A-WATCH","entry":6.83,"stop":6.65,"price":6.896699905395508,"past_r":0.37,"bar_vol_x":0.48,"result":"already past chase limit"}
+{"t":"13:44:03","sym":"LFTO","armed_from":"A-WATCH","entry":23.88,"stop":22.65,"price":23.90999984741211,"past_r":0.02,"bar_vol_x":2.12,"result":"BREAK"}
+{"t":"13:52:28","sym":"LFTO","armed_from":"A-WATCH","entry":23.91,"stop":23.01,"price":23.93000030517578,"past_r":0.02,"bar_vol_x":0.93,"result":"BREAK"}
+{"t":"13:52:28","sym":"SBC","armed_from":"A-WATCH","entry":6.92,"stop":6.7,"price":6.934999942779541,"past_r":0.07,"bar_vol_x":15.08,"result":"BREAK"}
+{"t":"13:59:50","sym":"GLAS","armed_from":"A-WATCH","entry":1.28,"stop":1.26,"price":1.284999966621399,"past_r":0.25,"bar_vol_x":0.76,"result":"BREAK"}
+{"t":"14:01:21","sym":"HAWK","armed_from":"B-WATCH","entry":17.98,"stop":17.56,"price":18.065000534057617,"past_r":0.2,"bar_vol_x":1.48,"result":"BREAK"}
+{"t":"14:02:54","sym":"LFTO","armed_from":"A-WATCH","entry":23.98,"stop":23.15,"price":24.104999542236328,"past_r":0.15,"bar_vol_x":2.1,"result":"BREAK"}
+{"t":"14:03:39","sym":"HAWK","armed_from":"B-WATCH","entry":18.1,"stop":17.56,"price":18.1200008392334,"past_r":0.04,"bar_vol_x":2.22,"result":"BREAK"}
+{"t":"14:04:55","sym":"NMAX","armed_from":"A-WATCH","entry":9.31,"stop":9.17,"price":9.380000114440918,"past_r":0.5,"bar_vol_x":1.98,"result":"already past chase limit"}
+{"t":"14:05:11","sym":"NGEN","armed_from":"A-WATCH","entry":1.86,"stop":1.82,"price":1.8693000078201294,"past_r":0.23,"bar_vol_x":4.65,"result":"BREAK"}
+{"t":"14:06:57","sym":"LFTO","armed_from":"A-WATCH","entry":24.14,"stop":23.22,"price":24.189899444580078,"past_r":0.05,"bar_vol_x":0.81,"result":"BREAK"}
+{"t":"14:13:22","sym":"SBC","armed_from":"A-WATCH","entry":6.96,"stop":6.82,"price":6.980000019073486,"past_r":0.14,"bar_vol_x":0.35,"result":"BREAK"}
+{"t":"14:15:09","sym":"HAWK","armed_from":"B-WATCH","entry":18.14,"stop":17.64,"price":18.149999618530273,"past_r":0.02,"bar_vol_x":2.25,"result":"BREAK"}
+{"t":"14:15:24","sym":"ANGX","armed_from":"B-WATCH","entry":4.53,"stop":4.35,"price":4.534999847412109,"past_r":0.03,"bar_vol_x":1.81,"result":"BREAK"}
+{"t":"14:21:15","sym":"NMAX","armed_from":"A-WATCH","entry":9.35,"stop":9.17,"price":9.369999885559082,"past_r":0.11,"bar_vol_x":1.91,"result":"BREAK"}
+{"t":"14:28:55","sym":"NMAX","armed_from":"A-WATCH","entry":9.38,"stop":9.19,"price":9.388999938964844,"past_r":0.05,"bar_vol_x":2.27,"result":"BREAK"}
