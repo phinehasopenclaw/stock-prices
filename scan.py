@@ -1252,7 +1252,8 @@ def watch_armed():
                 if key in fired:
                     continue
                 try:
-                    df = (data[s_] if len(syms) > 1 else data).dropna(subset=["Close"])
+                    multi = getattr(data.columns, "nlevels", 1) > 1
+                    df = (data[s_] if multi else data).dropna(subset=["Close"])
                 except Exception:
                     continue
                 if len(df) < 5:
