@@ -379,7 +379,7 @@ function card(r){
   return `<article class="card ${esc(r.setup)}${r.late && SIGNALS.includes(r.setup) ? " late" : ""}" data-sym="${esc(r.sym)}">
     <div class="top"><div style="min-width:0"><div class="sym">${esc(r.sym)}</div><div class="nm">${esc(r.name)}</div></div>
       <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div><div class="${chg >= 0 ? "up" : "dn"}">${chg >= 0 ? "+" : ""}${fmt(chg,1)}%</div>${L ? `<div class="live">LIVE</div>` : ""}</div></div>
-    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">LATE · skip or half size</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
+    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">AFTER 10:30 · half size or skip</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
     <div class="note">${esc(r.setup_note || "")}</div>
     ${chase}${armed}${lv}${size}
     ${sparkSVG(r.spark)}
