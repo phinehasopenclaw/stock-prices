@@ -210,6 +210,8 @@ const REPO = "phinehasopenclaw/stock-prices", BRANCH = "scan-data";
 const API = `https://api.github.com/repos/${REPO}/contents/scan.json?ref=${BRANCH}`;
 const RAW = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/scan.json`;
 const $ = id => document.getElementById(id);
+const ALERT_RV = 1.5;   // only ding for signals with real volume behind them (74-signal scoreboard, Nov 13)
+const loudEnough = r => (r.rel_vol || 0) >= ALERT_RV;
 const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT"];
 const LOSS_HALF = -200, LOSS_STOP = -400, WIN_DONE = 1200;   // Rule 9 + half-size step
 const store = {
@@ -282,7 +284,7 @@ async function loadScan(force){
 function checkTransitions(prev, next){
   const before = {}; (prev?.survivors || []).forEach(r => before[r.sym] = r.setup);
   (next.survivors || []).forEach(r => {
-    if (SIGNALS.includes(r.setup) && before[r.sym] !== r.setup && !r.late)
+    if (SIGNALS.includes(r.setup) && before[r.sym] !== r.setup && !r.late && loudEnough(r))
       alertOnce(r.sym + "|trig|" + r.setup + "|" + next.loop, `${r.sym} ${r.setup}`, `Entry ${fmt(r.entry)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)} · ${r.setup_note || ""}`);
   });
 }
@@ -346,7 +348,7 @@ function card(r){
     const sh = Math.floor(risk / (r.entry - r.stop));
     size = `<div class="size">Size at $${risk} risk: <b>${sh.toLocaleString()} sh</b> · $${Math.round(sh * r.entry).toLocaleString()} deployed</div>`;
   }
-  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH","ORB-WATCH","ORB-TRIGGER","IGNITION"].includes(r.setup) && !r.late)
+  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH","ORB-WATCH","ORB-TRIGGER","IGNITION"].includes(r.setup) && !r.late && loudEnough(r))
     alertOnce(r.sym + "|entry|" + r.entry, `${r.sym} through entry ${fmt(r.entry)}`, `Now ${fmt(price)} · stop ${fmt(r.stop)}`);
   const lv = r.entry ? `<div class="levels">
       <div class="lv entry"><i>Entry ≥</i><b>${fmt(r.entry)}</b></div>

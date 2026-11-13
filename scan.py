@@ -44,6 +44,7 @@ MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 60))
+PUSH_MIN_RV = 1.5   # phone push only when relative volume is 1.5x or more (Nov 13 scoreboard)
 RUN_MINUTES = int(os.environ.get("RUN_MINUTES", 350))
 END_CT_HHMM = (16, 15)      # stop at 16:15 CT year-round (DST-aware)
 ONE_SHOT = os.environ.get("ONE_SHOT") == "1"
@@ -751,8 +752,8 @@ def log_new_signals(survivors):
         signalled.add(r["sym"])
         if r["setup"] == "ORB-TRIGGER":
             orb_today.add((r["sym"], "ORB-TRIGGER"))
-        if not sig["repeat"]:
-            push_signal(sig, r)
+        if not sig["repeat"] and (r.get("rel_vol") or 0) >= PUSH_MIN_RV:
+            push_signal(sig, r)   # low-volume triggers are still logged and scored, just not pushed
 
 
 def push_signal(sig, r):
