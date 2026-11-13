@@ -348,8 +348,23 @@ function card(r){
     const sh = Math.floor(risk / (r.entry - r.stop));
     size = `<div class="size">Size at $${risk} risk: <b>${sh.toLocaleString()} sh</b> · $${Math.round(sh * r.entry).toLocaleString()} deployed</div>`;
   }
-  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH","ORB-WATCH","ORB-TRIGGER","IGNITION"].includes(r.setup) && !r.late && loudEnough(r))
+  if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH","ORB-WATCH","ORB-TRIGGER","IGNITION"].includes(r.setup) && !r.late && loudEnough(r)
+      && (price - r.entry) <= 0.3 * (r.entry - r.stop))
     alertOnce(r.sym + "|entry|" + r.entry, `${r.sym} through entry ${fmt(r.entry)}`, `Now ${fmt(price)} · stop ${fmt(r.stop)}`);
+  // Armed: entry known before the break. Rest a buy stop-limit now so the fill happens at the break,
+  // not minutes later; the limit caps the price, so a runaway gap simply doesn't fill.
+  const A = (scan.armed || []).find(a => a.sym === r.sym);
+  let armed = "";
+  if (A) {
+    const sh = Math.floor((+store.get("risk", "200") || 200) / (A.entry - A.stop));
+    armed = `<div class="next go"><b>ARMED</b> · rest this now in Public: <b>BUY STOP-LIMIT ${sh.toLocaleString()} sh · stop ${fmt(A.entry)} · limit ${fmt(A.buy_limit)}</b>. Then the protective stop at ${fmt(A.stop)} the moment it fills. Cancel if the card leaves the armed list.</div>`;
+  }
+  // Don't chase: once price is well past the entry, the planned risk no longer holds.
+  let chase = "";
+  if (r.entry && r.stop && r.entry > r.stop && price > r.entry) {
+    const past = (price - r.entry) / (r.entry - r.stop);
+    if (past > 0.3) chase = `<div class="next warn"><b>Don't chase:</b> ${fmt(past, 1)}R past the ${fmt(r.entry)} entry. Buying here puts the stop ${fmt(1 + past, 1)}R away. Wait for a pullback or the next setup.</div>`;
+  }
   const lv = r.entry ? `<div class="levels">
       <div class="lv entry"><i>Entry ≥</i><b>${fmt(r.entry)}</b></div>
       <div class="lv stop"><i>Stop</i><b>${fmt(r.stop)}</b></div>
@@ -366,7 +381,7 @@ function card(r){
       <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div><div class="${chg >= 0 ? "up" : "dn"}">${chg >= 0 ? "+" : ""}${fmt(chg,1)}%</div>${L ? `<div class="live">LIVE</div>` : ""}</div></div>
     <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">LATE · skip or half size</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
     <div class="note">${esc(r.setup_note || "")}</div>
-    ${lv}${size}
+    ${chase}${armed}${lv}${size}
     ${sparkSVG(r.spark)}
     <div class="stats"><span>VWAP <b>${fmt(r.vwap)}</b></span><span>High <b>${fmt(r.sess_high)}</b></span><span>PM <b>${fmt(r.pm_low)}–${fmt(r.pm_high)}</b></span>
       <span>Rel vol <b>${fmt(r.rel_vol,1)}x</b></span><span>Surge <b>${fmt(r.vol_surge,1)}x</b></span><span>Float <b>${fmtBig(r.float)}</b></span><span>Cap <b>${fmtBig(r.mcap)}</b></span></div>

@@ -15,8 +15,12 @@ import json
 import math
 import os
 import re
+import base64
+import gzip
+import io
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from zoneinfo import ZoneInfo
@@ -45,6 +49,16 @@ MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 60))
 PUSH_MIN_RV = 1.5   # phone push only when relative volume is 1.5x or more (Nov 13 scoreboard)
+# Armed levels: names whose entry is known before the break get watched on 1-minute bars every
+# WATCH_SECONDS, so the signal fires at the break instead of after a finished 5-minute bar
+# (Nov 11-13: opening-range triggers printed ~6 min late, 0.3R past entry).
+ARM_SETUPS = ("ORB-WATCH", "A-WATCH", "B-WATCH")
+ARM_MIN_RV = 1.5
+ARM_MAX = 8
+WATCH_SECONDS = 15
+CHASE_R = 0.3          # a break already more than this far past entry is logged, not pushed
+BUY_LIMIT_R = 0.25     # buy stop-limit: limit this far above the stop price, so a runaway never fills
+ARCHIVE_KEEP_DAYS = 7
 RUN_MINUTES = int(os.environ.get("RUN_MINUTES", 350))
 END_CT_HHMM = (16, 15)      # stop at 16:15 CT year-round (DST-aware)
 ONE_SHOT = os.environ.get("ONE_SHOT") == "1"
@@ -687,7 +701,7 @@ def fill_profile(row):
 #   full  = all shares out at T1 or the stop
 #   split = half out at T1, stop on the rest moves to breakeven, rest out at T2,
 #           breakeven, or the 14:45 CT time stop
-SIGNAL_SETUPS = ("IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT")
+SIGNAL_SETUPS = ("IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT")   # BREAK signals come from watch_armed()
 RESIGNAL_MIN = 20             # same name + setup can signal again after this many minutes
 FILL_WINDOW_MIN = 30           # a signal that never trades through its entry expires
 TIME_STOP_ET = dt.time(15, 45)  # 14:45 CT
@@ -955,6 +969,7 @@ def signal_stats():
         "all": done,
         "ORB-TRIGGER": [x for x in done if x["setup"] == "ORB-TRIGGER"],
         "IGNITION": [x for x in done if x["setup"] == "IGNITION"],
+        "BREAK (armed level)": [x for x in done if x["setup"] == "BREAK"],
         "A-TRIGGER": [x for x in done if x["setup"] == "A-TRIGGER"],
         "B-BREAKOUT": [x for x in done if x["setup"] == "B-BREAKOUT"],
         "prime (before 10:30 CT)": [x for x in done if x.get("prime")],
@@ -1031,6 +1046,250 @@ def fetch_quotes(syms):
     return out
 
 
+_lock = threading.RLock()
+_armed = {}            # sym -> armed level dict, refreshed every scan loop
+_wake = threading.Event()
+
+
+def today_ct():
+    return dt.datetime.now(CT).date().isoformat()
+
+
+def archive_dir(day=None):
+    d = os.path.join(OUT_DIR, "archive", day or today_ct())
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def archive_append(name, obj):
+    """Append one JSON line to today's archive file; published with the scan, restored on restart."""
+    try:
+        with open(os.path.join(archive_dir(), name), "a") as f:
+            f.write(json.dumps(obj, separators=(",", ":"), default=str) + "\n")
+    except Exception as e:
+        _state["errors"].append(f"archive: {e!r}"[:150])
+
+
+def archive_restore():
+    """A new run starts with an empty out/ dir: pull today's archive files back from scan-data."""
+    if not REPO:
+        return
+    h = {"Accept": "application/vnd.github.raw+json"}
+    if TOKEN:
+        h["Authorization"] = f"Bearer {TOKEN}"
+    day = today_ct()
+    for name in ("board.jsonl", "breaks.jsonl", "done"):
+        try:
+            r = requests.get(f"https://api.github.com/repos/{REPO}/contents/archive/{day}/{name}?ref=scan-data",
+                             headers=h, timeout=30)
+            if r.status_code == 200:
+                with open(os.path.join(archive_dir(day), name), "wb") as f:
+                    f.write(r.content)
+                log(f"restored archive/{day}/{name} ({len(r.content)} bytes)")
+        except Exception as e:
+            log(f"archive restore {name} failed: {e!r}")
+
+
+def archive_prune():
+    root = os.path.join(OUT_DIR, "archive")
+    if not os.path.isdir(root):
+        return
+    cutoff = (dt.datetime.now(CT).date() - dt.timedelta(days=ARCHIVE_KEEP_DAYS)).isoformat()
+    for d in os.listdir(root):
+        if d < cutoff:
+            subprocess.run(["rm", "-rf", os.path.join(root, d)])
+
+
+def board_line(session, survivors):
+    keys = ("sym", "price", "chg_pct", "setup", "entry", "stop", "t1", "t2", "vwap", "sess_high",
+            "rel_vol", "vol_surge", "vol_pace", "room_r", "ext_pct", "catalyst_type", "catalyst_strength", "late")
+    return {"t": dt.datetime.now(CT).strftime("%H:%M:%S"), "session": session,
+            "armed": sorted(_armed), "rows": [{k: r.get(k) for k in keys} for r in survivors[:25]]}
+
+
+def put_main(path, raw_bytes, msg):
+    """Write one file to main through the contents API (archive/ is outside the scanner's push trigger)."""
+    h = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}
+    url = f"https://api.github.com/repos/{REPO}/contents/{path}"
+    sha = None
+    r = requests.get(url, headers=h, params={"ref": "main"}, timeout=20)
+    if r.status_code == 200:
+        sha = r.json().get("sha")
+    body = {"message": msg, "content": base64.b64encode(raw_bytes).decode(), "branch": "main"}
+    if sha:
+        body["sha"] = sha
+    r = requests.put(url, headers=h, json=body, timeout=60)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"PUT {path} -> {r.status_code} {r.text[:120]}")
+
+
+def archive_day_close():
+    """Once after 15:05 CT: save the day's signals, board history and 1-minute bars for every name
+    that appeared, and copy them to main under archive/<date>/ so they're kept for good."""
+    day = today_ct()
+    d = archive_dir(day)
+    if os.path.exists(os.path.join(d, "done")) or not (REPO and TOKEN):
+        return
+    syms = set()
+    try:
+        with open(os.path.join(d, "board.jsonl")) as f:
+            for line in f:
+                try:
+                    syms.update(r["sym"] for r in json.loads(line)["rows"])
+                except Exception:
+                    pass
+    except FileNotFoundError:
+        pass
+    sigs = [x for x in load_signals() if x["date"] == day]
+    syms.update(x["sym"] for x in sigs)
+    syms = sorted(syms)
+    files = {"signals.json": json.dumps(sigs, separators=(",", ":"), default=str).encode()}
+    if syms:
+        try:
+            frames = []
+            for i in range(0, len(syms), 40):
+                chunk = syms[i:i + 40]
+                data = yf.download(chunk, period="1d", interval="1m", prepost=True, group_by="ticker",
+                                   progress=False, threads=True, auto_adjust=False)
+                for s_ in chunk:
+                    try:
+                        df = (data[s_] if len(chunk) > 1 else data).dropna(subset=["Close"]).copy()
+                        df["sym"] = s_
+                        frames.append(df)
+                    except Exception:
+                        pass
+            if frames:
+                import pandas as pd
+                allb = pd.concat(frames)
+                allb.index = allb.index.tz_convert(CT)
+                buf = io.BytesIO()
+                with gzip.GzipFile(fileobj=buf, mode="wb") as g:
+                    g.write(allb.to_csv().encode())
+                files["bars_1m.csv.gz"] = buf.getvalue()
+        except Exception as e:
+            log(f"close archive bars failed: {e!r}")
+    for name in ("board.jsonl", "breaks.jsonl"):
+        fp = os.path.join(d, name)
+        if os.path.exists(fp):
+            with open(fp, "rb") as f:
+                files[name + ".gz"] = gzip.compress(f.read())
+    try:
+        for name, raw in files.items():
+            put_main(f"archive/{day}/{name}", raw, f"archive {day} {name}")
+        open(os.path.join(d, "done"), "w").write(dt.datetime.now(CT).isoformat())
+        log(f"archived {day}: {', '.join(files)} ({len(syms)} symbols)")
+    except Exception as e:
+        _state["errors"].append(f"close archive: {e!r}"[:200])
+
+
+def make_signal(r, setup, now_ct, price):
+    return {
+        "id": f"{now_ct.date().isoformat()}-{r['sym']}-{setup}-{now_ct:%H%M%S}",
+        "date": now_ct.date().isoformat(), "time_ct": now_ct.strftime("%H:%M"), "ts": int(time.time()),
+        "sym": r["sym"], "setup": setup,
+        "entry": r["entry"], "stop": r["stop"], "t1": r.get("t1"), "t2": r.get("t2"),
+        "price_at_signal": price,
+        "catalyst_type": r.get("catalyst_type"), "catalyst_strength": r.get("catalyst_strength"),
+        "bad_headline": bool(r.get("bad_headline")), "rel_vol": r.get("rel_vol"),
+        "vol_surge": r.get("vol_surge"), "float": r.get("float"),
+        "prime": now_ct.time() < PRIME_END_CT,
+        "vol_pace": r.get("vol_pace"), "room_r": r.get("room_r"),
+        "status": "pending",
+    }
+
+
+def arm_levels(session, survivors):
+    """Pick the names worth watching tick by tick: a known entry, real volume, not late."""
+    armed = {}
+    if session == "REGULAR" and dt.datetime.now(CT).time() < dt.time(14, 30):
+        for r in survivors:
+            if (r.get("setup") in ARM_SETUPS and r.get("entry") and r.get("stop")
+                    and r["entry"] > r["stop"] and (r.get("rel_vol") or 0) >= ARM_MIN_RV
+                    and not r.get("bad_headline")):
+                R = r["entry"] - r["stop"]
+                armed[r["sym"]] = {
+                    "sym": r["sym"], "setup": r["setup"], "entry": r["entry"], "stop": r["stop"],
+                    "t1": r.get("t1"), "t2": r.get("t2"), "rel_vol": r.get("rel_vol"),
+                    "buy_limit": round(r["entry"] + BUY_LIMIT_R * R, 2),
+                    "row": {k: r.get(k) for k in ("sym", "entry", "stop", "t1", "t2", "catalyst_type",
+                                                  "catalyst_strength", "bad_headline", "rel_vol", "vol_surge",
+                                                  "float", "vol_pace", "room_r", "setup_note", "warnings")},
+                }
+            if len(armed) >= ARM_MAX:
+                break
+    with _lock:
+        _armed.clear()
+        _armed.update(armed)
+    return [{k: v for k, v in a.items() if k != "row"} for a in armed.values()]
+
+
+def watch_armed():
+    """Background thread: every WATCH_SECONDS, read 1-minute bars for armed names and fire the
+    moment price trades through the armed entry on volume."""
+    fired = set()
+    while True:
+        time.sleep(WATCH_SECONDS)
+        try:
+            with _lock:
+                armed = {k: dict(v) for k, v in _armed.items()}
+            if not armed:
+                continue
+            syms = sorted(armed)
+            data = yf.download(syms, period="1d", interval="1m", prepost=False, group_by="ticker",
+                               progress=False, threads=True, auto_adjust=False)
+            now_ct = dt.datetime.now(CT)
+            for s_ in syms:
+                a = armed[s_]
+                key = (now_ct.date().isoformat(), s_, a["entry"])
+                if key in fired:
+                    continue
+                try:
+                    df = (data[s_] if len(syms) > 1 else data).dropna(subset=["Close"])
+                except Exception:
+                    continue
+                if len(df) < 5:
+                    continue
+                last = df.iloc[-1]
+                price, hi = float(last["Close"]), float(last["High"])
+                if hi < a["entry"]:
+                    continue
+                vols = df["Volume"].iloc[-21:-1]
+                base = float(vols.median()) if len(vols) else 0.0
+                vol_x = float(last["Volume"]) / base if base > 0 else None
+                R = a["entry"] - a["stop"]
+                past_r = (price - a["entry"]) / R if R > 0 else 0
+                fired.add(key)
+                ev = {"t": now_ct.strftime("%H:%M:%S"), "sym": s_, "armed_from": a["setup"],
+                      "entry": a["entry"], "stop": a["stop"], "price": price, "past_r": round(past_r, 2),
+                      "bar_vol_x": round(vol_x, 2) if vol_x else None}
+                if price < a["entry"]:
+                    ev["result"] = "touched and rejected"   # wicked through, closed back under
+                elif past_r > CHASE_R:
+                    ev["result"] = "already past chase limit"
+                else:
+                    ev["result"] = "BREAK"
+                archive_append("breaks.jsonl", ev)
+                log(f"armed {s_} {ev['result']} @ {price} (entry {a['entry']}, {past_r:+.2f}R, bar vol {vol_x})")
+                if ev["result"] != "BREAK":
+                    continue
+                with _lock:
+                    sigs = load_signals()
+                    already = any(x["date"] == now_ct.date().isoformat() and x["sym"] == s_ for x in sigs)
+                    sig = make_signal(a["row"], "BREAK", now_ct, price)
+                    sig["armed_from"] = a["setup"]
+                    sig["bar_vol_x"] = ev["bar_vol_x"]
+                    sig["buy_limit"] = a["buy_limit"]
+                    sig["repeat"] = already
+                    sigs.append(sig)
+                if not already and (vol_x or 0) >= 1.5:   # light-volume breaks are logged and scored, not pushed
+                    push_signal(sig, dict(a["row"], setup_note=(
+                        f"Broke armed entry {a['entry']:.2f} ({a['setup']}), now {price:.2f}. "
+                        f"Buy limit no higher than {a['buy_limit']:.2f}; stop {a['stop']:.2f}.")))
+                _wake.set()
+        except Exception as e:
+            log(f"watcher error: {e!r}")
+
+
 def one_loop():
     _state["loop"] += 1
     _state["errors"] = []
@@ -1065,7 +1324,9 @@ def one_loop():
     for r in survivors + rejected:
         for k in ("price", "prev_close", "chg_pct"):
             r[k] = fnum(r.get(k), 4 if k != "chg_pct" else 2)
+    armed_out = arm_levels(session, survivors)
     try:
+        _lock.acquire()
         close_stale_signals()
         if session == "REGULAR":
             log_new_signals(survivors)
@@ -1077,6 +1338,8 @@ def one_loop():
     except Exception as e:
         _state["errors"].append(f"scoreboard: {e!r}"[:200])
         signals_today, stats = [], {}
+    finally:
+        _lock.release()
     quotes = {}
     if session == "REGULAR":
         try:
@@ -1085,6 +1348,7 @@ def one_loop():
             _state["errors"].append(f"quotes: {e!r}"[:150])
     now = dt.datetime.now(dt.timezone.utc)
     payload = {
+        "armed": armed_out,
         "quotes": quotes,
         "updated_utc": now.isoformat(timespec="seconds"),
         "updated_ct": now.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S CT"),
@@ -1104,7 +1368,11 @@ def one_loop():
         "signal_stats": stats,
         "errors": _state["errors"],
     }
-    publish(payload)
+    archive_append("board.jsonl", board_line(session, survivors))
+    if session != "PRE" and dt.datetime.now(CT).time() >= dt.time(15, 5):
+        archive_day_close()
+    with _lock:
+        publish(payload)
     log(f"loop {_state['loop']} {session}: universe={len(rows)} movers={len(movers)} "
         f"survivors={len(survivors)} in {time.time() - t0:.0f}s")
     return session
@@ -1127,6 +1395,9 @@ def relay():
 
 def main():
     start = time.time()
+    archive_restore()
+    archive_prune()
+    threading.Thread(target=watch_armed, daemon=True).start()
     end_today = dt.datetime.now(CT).replace(hour=END_CT_HHMM[0], minute=END_CT_HHMM[1],
                                             second=0, microsecond=0)
     deadline = min(start + RUN_MINUTES * 60, end_today.timestamp())
@@ -1146,7 +1417,8 @@ def main():
         if session == "CLOSED" and dt.datetime.now(ET).hour >= 16:
             log("Market closed for the day; exiting.")
             break
-        time.sleep(max(10, LOOP_SECONDS - (time.time() - t)))
+        _wake.wait(max(10, LOOP_SECONDS - (time.time() - t)))
+        _wake.clear()
 
 
 if __name__ == "__main__":
