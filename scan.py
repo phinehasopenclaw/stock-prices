@@ -51,6 +51,7 @@ NEWS_TTL = 20 * 60          # seconds to cache a news lookup
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 60))
 FLOW_MIN = 5.0      # intraday: minute-to-minute volume vs normal per-minute volume that pulls a name in
 FLOW_SLOTS = 10     # bar-analysis slots kept for intraday flow movers
+STICKY_SLOTS = 12   # extra slots for names that signalled today, so their cards stay up
 PUSH_MIN_RV = 1.5   # phone push only when relative volume is 1.5x or more (Nov 13 scoreboard)
 # Armed levels: names whose entry is known before the break get watched on 1-minute bars every
 # WATCH_SECONDS, so the signal fires at the break instead of after a finished 5-minute bar
@@ -741,6 +742,9 @@ def apply_filter(r, session=None):
     catalyst_ok = r.get("catalyst_strength") in ("strong", "analyst") or (
         low_float and (rel or 0) >= 1.0 and r.get("catalyst_strength") == "weak")
     squeeze = low_float and (rel or 0) >= 2.0
+    if r.get("sticky") and not catalyst_ok and r.get("catalyst_strength") != "negative":
+        catalyst_ok = True   # it already signalled today; keep tracking it to the end of the move
+        r["catalyst_strength"] = "flow"
     if r.get("flow_mover") and not catalyst_ok and r.get("catalyst_strength") != "negative":
         catalyst_ok = True   # the volume burst is the evidence; flagged below so it's verified by hand
         r["catalyst_strength"] = "flow"
@@ -1490,6 +1494,30 @@ def mark_flow(rows):
     return flow
 
 
+_shown = {}     # sym -> the setup fields last shown on the board
+_pending = {}   # sym -> a new setup seen once, waiting for a second scan to confirm
+DEBOUNCE_KEYS = ("setup", "setup_note", "entry", "stop", "t1", "t2", "risk_pct", "room_r", "pullback_zone")
+IMMEDIATE = set(SIGNAL_SETUPS) | {"FADING", "PM-FADE", "NO DATA", "THIN"}
+
+
+def debounce(rows):
+    """Display only (signals and arming already ran on the raw read): a card changes its setup
+    label only on the second scan in a row that disagrees with it (holds at most one scan; a
+    one-scan blip back to the shown setup cancels the change). Triggers and fades show at once.
+    PAR flipped IGNITION / B-BREAKOUT / B-WATCH five times in six minutes on Nov 16."""
+    for r in rows:
+        s_, new = r["sym"], r.get("setup")
+        shown = _shown.get(s_)
+        if shown is None or new == shown["setup"] or new in IMMEDIATE or s_ in _pending:
+            _shown[s_] = {k: r.get(k) for k in DEBOUNCE_KEYS}
+            _pending.pop(s_, None)
+            continue
+        _pending[s_] = new
+        r["setup_raw"] = new
+        for k in DEBOUNCE_KEYS:
+            r[k] = shown[k]
+
+
 def one_loop():
     _state["loop"] += 1
     _state["errors"] = []
@@ -1502,6 +1530,17 @@ def one_loop():
     flow = [r for r in flow if PRICE_MIN <= r["price"] <= PRICE_MAX][:FLOW_SLOTS]
     top = movers[:MAX_BAR_NAMES - len(flow)] + flow
     movers = movers + flow
+    # Sticky: a name that signalled today keeps its slot all session, even after it drops out
+    # of the gap / flow lists (PAR Nov 16: card vanished at 10:20, stock ran another +2.5R).
+    if session == "REGULAR":
+        today = dt.datetime.now(CT).date().isoformat()
+        with _lock:
+            fired = {x["sym"] for x in load_signals() if x.get("date") == today}
+        have = {r["sym"] for r in top}
+        sticky = [r for r in rows if r["sym"] in fired and r["sym"] not in have][:STICKY_SLOTS]
+        for r in sticky:
+            r["sticky"] = True
+        top = top + sticky
     fetch_bars(top, session)
     for r in top:
         if session == "PRE":
@@ -1543,6 +1582,7 @@ def one_loop():
         signals_today, stats = [], {}
     finally:
         _lock.release()
+    debounce(survivors)
     quotes = {}
     if session == "REGULAR":
         try:
