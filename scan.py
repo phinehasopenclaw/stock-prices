@@ -901,8 +901,18 @@ def log_new_signals(survivors):
             orb_today.add((r["sym"], "ORB-TRIGGER"))
         sig["flow_mover"] = bool(r.get("flow_mover"))
         sig["flow_x"] = r.get("flow_x")
-        if not sig["repeat"] and (r.get("rel_vol") or 0) >= PUSH_MIN_RV and r.get("catalyst_strength") != "flow":
-            push_signal(sig, r)   # low-volume triggers are still logged and scored, just not pushed
+        if not sig["repeat"] and push_worthy(r):
+            push_signal(sig, r)   # everything else is still logged and scored, just not pushed
+
+
+def push_worthy(r):
+    """Nov 16 rule: IGNITION pushes on its own burst pace (>= IGNITION_PACE), news or not; no-news
+    names are tagged to verify. Scoreboard Nov 13-16: no-news IGNITION 12/36 fills reached +1R.
+    Every other setup still needs day rel vol >= PUSH_MIN_RV and a real catalyst (no-news
+    B-BREAKOUT: 8/83 reached +1R)."""
+    if r.get("setup") == "IGNITION":
+        return (r.get("vol_pace") or 0) >= IGNITION_PACE
+    return (r.get("rel_vol") or 0) >= PUSH_MIN_RV and r.get("catalyst_strength") != "flow"
 
 
 def push_signal(sig, r):
@@ -911,7 +921,9 @@ def push_signal(sig, r):
         return  # after 10:30 CT signals are logged for the record but not pushed (replay: -0.27R avg)
     risk = sig["entry"] - sig["stop"]
     late = not sig.get("prime")
-    title = f"{'LATE ' if late else ''}{sig['sym']} {sig['setup']} {sig['time_ct']} CT"
+    nonews = r.get("catalyst_strength") == "flow"
+    title = (f"{'LATE ' if late else ''}{sig['sym']} {sig['setup']} {sig['time_ct']} CT"
+             + (" - NO NEWS, verify" if nonews else ""))
     cat = f"{r.get('catalyst_type') or 'no type'} ({r.get('catalyst_strength')})"
     body = (f"Entry >= {sig['entry']:.2f} | stop {sig['stop']:.2f} | T1 {sig['t1']:.2f} (2R) | "
             f"risk {risk / sig['entry'] * 100:.1f}%\n{r.get('setup_note') or ''}\nCatalyst: {cat}"
@@ -921,7 +933,7 @@ def push_signal(sig, r):
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=body.encode("utf-8"), timeout=10, headers={
             "Title": title.encode("ascii", "ignore").decode(),
             "Priority": "3" if late else "5",
-            "Tags": "warning" if late or r.get("bad_headline") else "rocket",
+            "Tags": "warning" if late or r.get("bad_headline") or nonews else "rocket",
             "Click": f"https://{REPO.split('/')[0]}.github.io/{REPO.split('/')[-1]}/scanner.html" if REPO else "",
         })
     except Exception as e:

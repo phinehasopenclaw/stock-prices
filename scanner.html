@@ -213,7 +213,8 @@ const API = `https://api.github.com/repos/${REPO}/contents/scan.json?ref=${BRANC
 const RAW = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/scan.json`;
 const $ = id => document.getElementById(id);
 const ALERT_RV = 1.5;   // only ding for signals with real volume behind them (74-signal scoreboard, Nov 13)
-const loudEnough = r => (r.rel_vol || 0) >= ALERT_RV;
+// IGNITION is judged on its own burst pace (3x+), not the day's rel vol (PAR Nov 16: 13x pace, 0.97x day).
+const loudEnough = r => r.setup === "IGNITION" ? (r.vol_pace || 0) >= 3 : (r.rel_vol || 0) >= ALERT_RV;
 const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT"];
 const LOSS_HALF = -200, LOSS_STOP = -400, WIN_DONE = 1200;   // Rule 9 + half-size step
 const store = {
@@ -359,9 +360,9 @@ function verdict(r, price){
     if (price < r.stop) return ["SKIP", `Under the ${fmt(r.stop)} stop level: setup broken`];
     const A = (scan.armed || []).find(a => a.sym === r.sym);
     if (SIGNALS.includes(r.setup) || (A && price >= r.entry)) {
-      if (!loudEnough(r)) return ["WAIT", `Trigger on thin volume (rel vol ${fmt(r.rel_vol,1)}x < ${ALERT_RV}x)`];
+      if (!loudEnough(r)) return ["WAIT", r.setup === "IGNITION" ? `Burst faded (pace ${fmt(r.vol_pace,1)}x < 3x)` : `Trigger on thin volume (rel vol ${fmt(r.rel_vol,1)}x < ${ALERT_RV}x)`];
       if (price < r.entry) return ["WAIT", `Buy stop ${fmt(r.entry)} · stop ${fmt(r.stop)}`];
-      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)}${half}`];
+      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)}${half}${r.catalyst_strength === "flow" ? " · NO NEWS, verify" : ""}`];
     }
     if (r.setup === "A-WATCH" && r.room_r != null && r.room_r < 2) return ["SKIP", `Only ${fmt(r.room_r,1)}R to the ${fmt(r.sess_high)} high: pays less than it risks`];
     if (A) return ["WAIT", `Armed: buy stop ${fmt(A.entry)} limit ${fmt(A.buy_limit)} · stop ${fmt(A.stop)}`];
