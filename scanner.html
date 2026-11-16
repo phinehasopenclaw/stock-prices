@@ -73,7 +73,7 @@ button.inbtn[disabled]{opacity:.45;cursor:not-allowed}
 .chip.A-TRIGGER{background:var(--good);color:#06130b}.chip.A-WATCH{background:var(--good-bg);color:var(--good);border:1px solid var(--good)}
 .chip.B-BREAKOUT{background:var(--info);color:#071226}.chip.B-WATCH{background:var(--info-bg);color:var(--info)}
 .chip.EXTENDED{background:var(--warn-bg);color:var(--warn)}.chip.PM-WATCH{background:var(--info-bg);color:var(--info);border:1px dashed var(--info)}.card.PM-WATCH{border-left-color:var(--info);border-left-style:dashed}.chip.HOLDING,.chip.THIN,.chip.NO.DATA{background:var(--panel2);color:var(--muted)}
-.chip.FADING{background:var(--bad-bg);color:var(--bad)}
+.chip.FADING,.chip.PM-FADE{background:var(--bad-bg);color:var(--bad)}.chip.PM-STRONG{background:var(--info-bg);color:var(--info)}.card.PM-STRONG{border-left-color:var(--info)}
 .chip.cat{background:var(--panel2);color:var(--fg);font-weight:500}
 .chip.warnf{background:var(--bad-bg);color:var(--bad);font-weight:500}
 .note{font-size:13px;color:var(--fg)}
@@ -370,7 +370,7 @@ function card(r){
       <div class="lv stop"><i>Stop</i><b>${fmt(r.stop)}</b></div>
       <div class="lv"><i>T1</i><b>${fmt(r.t1)}</b></div>
       <div class="lv"><i>Risk</i><b>${fmt(r.risk_pct,1)}%</b></div></div>` :
-    r.pullback_zone ? `<div class="levels"><div class="lv entry" style="grid-column:span 2"><i>Pullback zone</i><b>${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}</b></div><div class="lv"><i>VWAP</i><b>${fmt(r.vwap)}</b></div><div class="lv"><i>Ext</i><b>${fmt(r.ext_pct,1)}%</b></div></div>` : "";
+    r.pullback_zone ? `<div class="levels"><div class="lv entry" style="grid-column:span 2"><i>Pullback zone</i><b>${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}</b></div><div class="lv"><i>${r.vwap_basis==="time"?"TWAP*":"VWAP"}</i><b>${fmt(r.vwap)}</b></div><div class="lv"><i>Ext</i><b>${fmt(r.ext_pct,1)}%</b></div></div>` : "";
   const cat = r.catalyst ? `<div class="cat"><a href="${esc(r.catalyst.url)}" target="_blank" rel="noopener">${esc(r.catalyst.headline)}</a> <small>${esc(r.catalyst.source || "")} · ${esc(r.catalyst.time)}</small></div>`
     : `<div class="cat"><small>${r.catalyst_strength === "squeeze" ? "No news. Low-float volume squeeze." : "No company news found."}</small></div>`;
   const tags = [`<span class="chip cat">${esc(r.catalyst_type ? r.catalyst_type + " · " + r.catalyst_strength : "Catalyst: " + r.catalyst_strength)}</span>`,
@@ -383,7 +383,7 @@ function card(r){
     <div class="note">${esc(r.setup_note || "")}</div>
     ${chase}${armed}${lv}${size}
     ${sparkSVG(r.spark)}
-    <div class="stats"><span>VWAP <b>${fmt(r.vwap)}</b></span><span>High <b>${fmt(r.sess_high)}</b></span><span>PM <b>${fmt(r.pm_low)}–${fmt(r.pm_high)}</b></span>
+    <div class="stats"><span title="${r.vwap_basis==="time"?"Time-weighted: Yahoo reports no pre-market volume. Not a real VWAP.":"Volume-weighted average price"}">${r.vwap_basis==="time"?"TWAP*":"VWAP"} <b>${fmt(r.vwap)}</b></span><span>High <b>${fmt(r.sess_high)}</b></span><span>PM <b>${fmt(r.pm_low)}–${fmt(r.pm_high)}</b></span>
       <span>Rel vol <b>${fmt(r.rel_vol,1)}x</b></span><span>Surge <b>${fmt(r.vol_surge,1)}x</b></span><span>Float <b>${fmtBig(r.float)}</b></span><span>Cap <b>${fmtBig(r.mcap)}</b></span></div>
     ${cat}${r.bad_headline ? `<div class="cat"><small class="dn">Also in the news: ${esc(r.bad_headline)}</small></div>` : ""}<div class="tags">${tags}</div>
     ${positions[r.sym] ? `<button type="button" class="inbtn on" data-goto="${esc(r.sym)}">Tracking above</button>` : `<button type="button" class="inbtn" data-in="${esc(r.sym)}"${dayState().block ? " disabled" : ""}>${dayState().block ? "Done for the day" : "I'm in"}</button>`}

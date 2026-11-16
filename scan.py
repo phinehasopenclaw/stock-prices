@@ -316,6 +316,41 @@ def ema(vals, n):
     return out
 
 
+PM_STRONG_OFF_HIGH = 3.0   # % below the pre-market high that still counts as holding the high
+PM_FADE_OFF_HIGH = 8.0     # % below the pre-market high that counts as a fade (with price under EMA9)
+
+
+def pm_read(row, pre, price, ema9):
+    """Pre-market read. No entries before the open (Rule 8), and Yahoo pre-market bars carry
+    no volume, so VWAP/surge setups can't be judged. Report where price sits in the
+    pre-market range instead, with the levels that matter at the open."""
+    hi, lo = float(pre["High"].max()), float(pre["Low"].min())
+    off_high = (hi - price) / hi * 100 if hi else 0.0
+    rng = hi - lo
+    pos = (price - lo) / rng * 100 if rng > 0 else 50.0
+    above_ema = ema9 is not None and price >= ema9
+    closes = list(pre["Close"])
+    lower_highs = len(pre) >= 4 and max(pre["High"].iloc[-3:]) < hi and closes[-1] < closes[-4]
+    row["pm_off_high_pct"] = fnum(off_high, 1)
+    row["pm_range_pos"] = fnum(pos, 0)
+    e = f"{ema9:.2f}" if ema9 is not None else "EMA9"
+    if off_high <= PM_STRONG_OFF_HIGH and above_ema:
+        row["setup"] = "PM-STRONG"
+        row["setup_note"] = (f"Holding the pre-market high {hi:.2f} ({off_high:.1f}% off). "
+                             f"At the open: buy only the break of a green first 5-min candle (Rule 8); "
+                             f"a clean move through {hi:.2f} is the confirmation.")
+    elif off_high >= PM_FADE_OFF_HIGH and not above_ema:
+        row["setup"] = "PM-FADE"
+        row["setup_note"] = (f"Faded {off_high:.0f}% off the pre-market high {hi:.2f}, below EMA9 {e}"
+                             + (", lower highs" if lower_highs else "") + ". "
+                             f"Skip at the open unless it reclaims {e} on volume.")
+    else:
+        row["setup"] = "PM-WATCH"
+        row["setup_note"] = (f"Mid-range: {pos:.0f}% of the pre-market range {lo:.2f}–{hi:.2f}, "
+                             f"{off_high:.1f}% off the high, {'above' if above_ema else 'below'} EMA9 {e}. "
+                             "Wait for the first 5-min candle.")
+
+
 def analyze_bars(df, row, session):
     """df: one ticker's 5m bars for today (ET index). Mutates row with setup info."""
     df = df.dropna(subset=["Close"])
@@ -337,8 +372,10 @@ def analyze_bars(df, row, session):
 
     tp = (sess["High"] + sess["Low"] + sess["Close"]) / 3
     v = sess["Volume"].fillna(0)
+    row["vwap_basis"] = "volume"
     if v.sum() <= 0:  # Yahoo pre-market bars carry no volume: use a time-weighted average
         v = v * 0 + 1
+        row["vwap_basis"] = "time"   # not a real VWAP; the page labels it TWAP
     vwap_series = (tp * v).cumsum() / v.cumsum().replace(0, float("nan"))
     vwap = fnum(vwap_series.iloc[-1], 4)
     closes = list(df["Close"])
@@ -363,6 +400,9 @@ def analyze_bars(df, row, session):
         row["setup"] = "PM-WATCH"
         row["setup_note"] = (f"Pre-market only ({len(pre)} print{'s' if len(pre) != 1 else ''}). "
                              "Watch it into the open; no entry before the first 5-min candle (Rule 8).")
+        return
+    if session == "PRE" and len(reg) == 0:
+        pm_read(row, pre, price, ema9)
         return
     if vwap is None or len(sess) < 3:
         row["setup"] = "THIN"
@@ -484,6 +524,12 @@ def analyze_bars(df, row, session):
         row["setup"] = "EXTENDED"
         row["setup_note"] = f"{ext:.1f}% above VWAP. No entry; wait for a pullback toward {support:.2f}."
         row["pullback_zone"] = [round(support, 2), round(support * 1.015, 2)]
+    elif pulled_back and price < support * 0.995:
+        # Pulled back INTO support and closed through it: support didn't hold. Price is still
+        # above VWAP (FADING returned earlier), so the EMA9 is what broke. Not a setup.
+        row["setup"] = "HOLDING"
+        row["setup_note"] = (f"Lost EMA9 {support:.2f}; sitting {ext:.1f}% above VWAP {vwap:.2f}. "
+                             f"Not a setup until it reclaims {support:.2f} on volume. Below {vwap:.2f} it's a fade.")
     elif pulled_back and trigger:
         lv(h[last] + 0.01, recent_low * 0.995, sess_high)
         if (row.get("room_r") or 0) >= 2:
@@ -616,7 +662,7 @@ def check_news(row):
 
 # ---- Filter & rank --------------------------------------------------------
 SETUP_RANK = {"IGNITION": 0, "ORB-TRIGGER": 0, "A-TRIGGER": 0, "ORB-WATCH": 1, "A-WATCH": 1, "B-BREAKOUT": 2, "B-WATCH": 3,
-              "HOLDING": 4, "PM-WATCH": 4, "EXTENDED": 5, "THIN": 6, "FADING": 7, "NO DATA": 8}
+              "PM-STRONG": 3, "HOLDING": 4, "PM-WATCH": 4, "PM-FADE": 7, "EXTENDED": 5, "THIN": 6, "FADING": 7, "NO DATA": 8}
 
 
 def apply_filter(r, session=None):
@@ -634,7 +680,7 @@ def apply_filter(r, session=None):
         w = list(r.get("warnings") or [])
         w.append(f"Intraday volume burst {r.get('flow_x')}x normal, no news found: check before entry")
         r["warnings"] = w
-    holding_ok = r.get("setup") not in ("FADING", "NO DATA", "THIN")
+    holding_ok = r.get("setup") not in ("FADING", "PM-FADE", "NO DATA", "THIN")
     flt = r.get("float")
     dollar_vol = (r.get("cum_vol") or 0) * (r.get("price") or 0)
     r["dollar_vol"] = int(dollar_vol)
@@ -656,7 +702,7 @@ def apply_filter(r, session=None):
         reasons.append({"unchecked": "News not checked yet",
                         "negative": "Bad-news headline"}.get(r.get("catalyst_strength"), "No catalyst"))
     if not holding_ok:
-        reasons.append({"FADING": "Fading below VWAP", "THIN": "Too few bars"}.get(r.get("setup"), "No bar data"))
+        reasons.append({"FADING": "Fading below VWAP", "PM-FADE": "Faded off the pre-market high", "THIN": "Too few bars"}.get(r.get("setup"), "No bar data"))
     if not liquid_ok:
         reasons.append("Tiny float (<5M sh)" if tiny_float else
                        (f"Under ${dv_min/1e6:g}M traded" if dv_min >= 1e6 else f"Under ${dv_min/1e3:g}K traded")
