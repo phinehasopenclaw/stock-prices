@@ -113,6 +113,28 @@ NEG = re.compile(
     r"halt(s|ed)? (trial|study|enrollment)|reject\w*|delay(s|ed)?|withdraw\w*|warns?)\b",
     re.I,
 )
+MIXED = re.compile(r"\b(beat(s)?|top(s|ped)?|exceed\w*|surpass\w*|raise[sd]?|record)\b", re.I)
+
+
+def day_fraction_at(minutes_after_open):
+    return day_fraction(dt.datetime.now(CT).replace(hour=8, minute=30, second=0) + dt.timedelta(minutes=minutes_after_open))
+
+
+def day_fraction(now_ct=None):
+    """Share of a normal day's volume that has usually traded by now (U-shaped profile:
+    first 30 min ~13%, midday flat, last 30 min ~15%). None outside the regular session."""
+    now_ct = now_ct or dt.datetime.now(CT)
+    m = (now_ct.hour * 60 + now_ct.minute + now_ct.second / 60) - (8 * 60 + 30)
+    if m < 0:
+        return None
+    m = max(m, 2.0)           # first prints: don't divide by ~0
+    if m <= 30:
+        return 0.13 * m / 30
+    if m <= 360:
+        return 0.13 + 0.72 * (m - 30) / 330
+    return min(1.0, 0.85 + 0.15 * (m - 360) / 30)
+
+
 CAT_TYPES = [
     ("M&A", r"acqui|merger|buyout|takeover|to be acquired|tender offer"),
     ("FDA/Clinical", r"\bfda\b|approv|clearance|phase \d|phase [iv]+|\btrial\b|topline|data readout"),
@@ -623,7 +645,13 @@ def check_news(row):
                 warns.add(label)
         if not any(w in text for w in POS_WORDS):
             continue
-        if NEG.search(head):
+        if NEG.search(head) and MIXED.search(head):
+            # "Beats estimates, guides lower": a real catalyst with a caveat, not bad news.
+            warns.add("Mixed headline")
+            row["mixed_headline"] = row.get("mixed_headline") or head[:160]
+            if cat is None:
+                cat = n
+        elif NEG.search(head):
             bad = bad or n          # news exists, but the headline reads bad
             warns.add("Bad-news headline")
             row["bad_headline"] = row.get("bad_headline") or head[:160]
@@ -667,8 +695,12 @@ SETUP_RANK = {"IGNITION": 0, "ORB-TRIGGER": 0, "A-TRIGGER": 0, "ORB-WATCH": 1, "
 
 def apply_filter(r, session=None):
     rel = None
+    frac = day_fraction() if session == "REGULAR" else None
     if r.get("avg_vol") and r.get("cum_vol"):
-        rel = r["cum_vol"] / r["avg_vol"]
+        # Regular session: today's volume vs what normally trades by THIS time of day.
+        # (Full-day average early in the session read every opener as "thin".)
+        rel = r["cum_vol"] / (r["avg_vol"] * (frac or 1.0))
+        r["rel_vol_day"] = fnum(r["cum_vol"] / r["avg_vol"], 2)
     r["rel_vol"] = fnum(rel, 2)
     low_float = (r.get("float") or 1e12) < 20e6
     catalyst_ok = r.get("catalyst_strength") in ("strong", "analyst") or (
@@ -686,6 +718,14 @@ def apply_filter(r, session=None):
     r["dollar_vol"] = int(dollar_vol)
     tiny_float = flt is not None and flt < FLOAT_MIN
     dv_min = PM_DOLLAR_MIN if session == "PRE" else DOLLAR_VOL_MIN
+    if session == "REGULAR" and frac is not None and frac < day_fraction_at(20):
+        # First 20 minutes: scale the $ bar to elapsed volume share so openers aren't rejected
+        # as "thin" one minute after the bell; if today's volume isn't reported, judge the normal day.
+        dv_min = DOLLAR_VOL_MIN * frac / day_fraction_at(20)
+        if not r.get("cum_vol"):
+            dollar_vol = (r.get("avg_vol") or 0) * (r.get("price") or 0)
+            dv_min = DOLLAR_VOL_MIN
+            r["liquidity_basis"] = "avg daily $ (today's volume not reported yet)"
     if session == "PRE" and not r.get("cum_vol"):
         # Yahoo often omits pre-market volume. Judge by the name's normal day instead:
         # a stock that usually trades $3M+ will be exitable at the open.
