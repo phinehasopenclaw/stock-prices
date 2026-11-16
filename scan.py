@@ -58,6 +58,7 @@ PUSH_MIN_RV = 1.5   # phone push only when relative volume is 1.5x or more (Nov 
 ARM_SETUPS = ("ORB-WATCH", "A-WATCH", "B-WATCH")
 ARM_MIN_RV = 1.5
 ARM_MAX = 8
+B_ARM_MIN_SURGE = 0.5  # B-WATCH arms only if the last completed 5m bar traded >= half its baseline volume
 WATCH_SECONDS = 15
 CHASE_R = 0.3          # a break already more than this far past entry is logged, not pushed
 BUY_LIMIT_R = 0.25     # buy stop-limit: limit this far above the stop price, so a runaway never fills
@@ -606,6 +607,8 @@ def analyze_bars(df, row, session):
         row["setup_note"] = (f"{off:.1f}% under the high {sess_high:.2f}. "
                              + ("Volume is on the sell side; wait for a green push through the high."
                                 if heavy and not (buy_surge or buy_pace) else
+                                "Volume has dried up at the high: a stall, not a build."
+                                if (surge or 0) < B_ARM_MIN_SURGE else
                                 "Needs a break of the high on volume."))
         lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995)
     else:
@@ -1346,6 +1349,8 @@ def arm_levels(session, survivors):
         for r in survivors:
             if r.get("setup") == "A-WATCH" and (r.get("room_r") or 0) < 2:
                 continue   # a pullback buy with < 2R to the high pays less than it risks (VTSI Nov 16)
+            if r.get("setup") == "B-WATCH" and (r.get("vol_surge") or 0) < B_ARM_MIN_SURGE:
+                continue   # volume dried up at the high = a stall; a resting buy stop fills on any tick (FENC Nov 16)
             if (r.get("setup") in ARM_SETUPS and r.get("entry") and r.get("stop")
                     and r["entry"] > r["stop"] and (r.get("rel_vol") or 0) >= ARM_MIN_RV
                     and not r.get("bad_headline") and r.get("catalyst_strength") != "flow"):
