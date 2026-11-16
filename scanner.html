@@ -110,6 +110,8 @@ footer{margin-top:24px;color:var(--muted);font-size:12px}
 .order .tag{font:600 10px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .next{font-size:13px;padding:8px 10px;border-radius:6px;background:var(--info-bg);color:var(--fg)}
 .next.go{background:var(--good-bg)}.next.warn{background:var(--bad-bg)}
+.verdict{display:flex;gap:8px;align-items:baseline;font-size:13px;padding:6px 10px;border-radius:6px;margin:-2px 0 2px}.verdict b{font:700 13px var(--mono);letter-spacing:.06em}.verdict.NOW{background:var(--good);color:#fff}.verdict.WAIT{background:var(--warn-bg);color:var(--fg)}.verdict.WAIT b{color:var(--warn)}.verdict.SKIP{background:var(--panel2);color:var(--muted)}.verdict.SKIP b{color:var(--bad)}
+td .vd{font:700 11px var(--mono)}td .vd.NOW{color:var(--good)}td .vd.WAIT{color:var(--warn)}td .vd.SKIP{color:var(--bad)}
 .pbtns{display:flex;flex-wrap:wrap;gap:6px}
 .copyrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .copyrow code{font:12px var(--mono);background:var(--panel2);padding:6px 8px;border-radius:6px;white-space:pre-wrap;min-width:0;flex:1}
@@ -339,6 +341,35 @@ function sparkSVG(sp){
     <path d="${line(c)}" fill="none" stroke="${up ? "var(--good)" : "var(--bad)"}" stroke-width="1.8"/>
     <circle cx="${x(c.length-1, c.length)}" cy="${y(c[c.length-1])}" r="2.6" fill="${up ? "var(--good)" : "var(--bad)"}"/></svg>`;
 }
+// One-line call at the top of every card: NOW (act), WAIT (the exact condition), SKIP (why).
+// Uses the live price, so a signal that has already run is called SKIP, not NOW.
+const ctHM = () => { const p = new Intl.DateTimeFormat("en-US",{timeZone:"America/Chicago",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date()); return +p.find(x=>x.type==="hour").value * 100 + +p.find(x=>x.type==="minute").value; };
+function verdict(r, price){
+  if (!r.pass) return ["SKIP", (r.reject || []).join(", ") || "Fails a check"];
+  if (["FADING","PM-FADE","THIN","NO DATA"].includes(r.setup)) return ["SKIP", r.setup_note || r.setup];
+  if (dayState().block) return ["SKIP", "Done for the day (Rule 9)"];
+  if (scan.session === "PRE")
+    return ["WAIT", r.setup === "PM-STRONG" ? `Open: green first 5-min candle, then its high; ${fmt(r.pm_high)} must clear` : "First 5-min candle at 8:35 CT"];
+  if (scan.session !== "REGULAR") return ["SKIP", "Market closed"];
+  if (ctHM() >= 1430) return ["SKIP", "No new entries after 14:30 CT"];
+  const half = r.late || r.setup === "B-BREAKOUT" ? " · HALF size" : "";
+  if (r.entry && r.stop && r.entry > r.stop) {
+    const R = r.entry - r.stop, past = (price - r.entry) / R;
+    if (price >= r.entry && past > 0.3) return ["SKIP", `Ran ${fmt(past,1)}R past ${fmt(r.entry)}: missed, don't chase`];
+    if (price < r.stop) return ["SKIP", `Under the ${fmt(r.stop)} stop level: setup broken`];
+    const A = (scan.armed || []).find(a => a.sym === r.sym);
+    if (SIGNALS.includes(r.setup) || (A && price >= r.entry)) {
+      if (!loudEnough(r)) return ["WAIT", `Trigger on thin volume (rel vol ${fmt(r.rel_vol,1)}x < ${ALERT_RV}x)`];
+      if (price < r.entry) return ["WAIT", `Buy stop ${fmt(r.entry)} · stop ${fmt(r.stop)}`];
+      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)}${half}`];
+    }
+    if (A) return ["WAIT", `Armed: buy stop ${fmt(A.entry)} limit ${fmt(A.buy_limit)} · stop ${fmt(A.stop)}`];
+    return ["WAIT", `Needs a break of ${fmt(r.entry)}${loudEnough(r) ? "" : " on more volume"} · stop ${fmt(r.stop)}`];
+  }
+  if (r.setup === "EXTENDED" && r.pullback_zone) return ["WAIT", `Extended: pullback to ${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}`];
+  if (r.setup === "HOLDING" && r.ema9 && price < r.ema9) return ["WAIT", `Reclaim ${fmt(r.ema9)} on volume`];
+  return ["WAIT", "No trigger yet"];
+}
 function card(r){
   const L = quoteFor(r.sym), price = L ? L.p : r.price;
   const chg = r.prev_close ? (price / r.prev_close - 1) * 100 : r.chg_pct;
@@ -376,7 +407,9 @@ function card(r){
   const tags = [`<span class="chip cat">${esc(r.catalyst_type ? r.catalyst_type + " · " + r.catalyst_strength : "Catalyst: " + r.catalyst_strength)}</span>`,
     r.quality != null ? `<span class="chip cat">Rank score ${fmt(r.quality,1)}</span>` : ""]
     .concat((r.warnings || []).map(w => `<span class="chip warnf">${esc(w)}</span>`)).join("");
+  const [V, why] = verdict(r, price);
   return `<article class="card ${esc(r.setup)}${r.late && SIGNALS.includes(r.setup) ? " late" : ""}" data-sym="${esc(r.sym)}">
+    <div class="verdict ${V}"><b>${V}</b><span>${esc(why)}</span></div>
     <div class="top"><div style="min-width:0"><div class="sym">${esc(r.sym)}</div><div class="nm">${esc(r.name)}</div></div>
       <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div><div class="${chg >= 0 ? "up" : "dn"}">${chg >= 0 ? "+" : ""}${fmt(chg,1)}%</div>${L ? `<div class="live">LIVE</div>` : ""}</div></div>
     <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">AFTER 10:30 · half size or skip</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
@@ -403,7 +436,8 @@ function render(){
   $("moreN").textContent = `· ${extra.length}`;
   $("more").innerHTML = extra.map((r, i) => {
     const L = quoteFor(r.sym), p = L ? L.p : r.price, c = r.prev_close ? (p / r.prev_close - 1) * 100 : r.chg_pct;
-    return `<tr><td>${max + i + 1}</td><td><b>${esc(r.sym)}</b></td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
+    const [V] = verdict(r, p);
+    return `<tr><td>${max + i + 1}</td><td><span class="vd ${V}">${V}</span> <b>${esc(r.sym)}</b></td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
       <td class="${c >= 0 ? "up" : "dn"}">${c >= 0 ? "+" : ""}${fmt(c,1)}%</td><td><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span></td>
       <td>${fmt(r.entry)}</td><td>${fmt(r.stop)}</td><td>${fmt(r.rel_vol,1)}x</td>
       <td>${esc(r.catalyst_type || r.catalyst_strength || "")}${r.bad_headline ? " · ⚠ bad news" : ""}</td></tr>`;
