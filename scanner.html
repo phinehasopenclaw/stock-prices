@@ -110,6 +110,7 @@ footer{margin-top:24px;color:var(--muted);font-size:12px}
 .order .tag{font:600 10px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .next{font-size:13px;padding:8px 10px;border-radius:6px;background:var(--info-bg);color:var(--fg)}
 .next.go{background:var(--good-bg)}.next.warn{background:var(--bad-bg)}
+.chip.inplay{background:var(--good-bg);color:var(--good);font-weight:700}.chip.open{background:var(--info-bg);color:var(--info);font-weight:700}
 .verdict{display:flex;gap:8px;align-items:baseline;font-size:13px;padding:6px 10px;border-radius:6px;margin:-2px 0 2px}.verdict b{font:700 13px var(--mono);letter-spacing:.06em}.verdict.NOW{background:var(--good);color:#fff}.verdict.WAIT{background:var(--warn-bg);color:var(--fg)}.verdict.WAIT b{color:var(--warn)}.verdict.SKIP{background:var(--panel2);color:var(--muted)}.verdict.SKIP b{color:var(--bad)}
 td .vd{font:700 11px var(--mono)}td .vd.NOW{color:var(--good)}td .vd.WAIT{color:var(--warn)}td .vd.SKIP{color:var(--bad)}
 .pbtns{display:flex;flex-wrap:wrap;gap:6px}
@@ -157,7 +158,7 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
 <div id="freshWrap" hidden>
 <h2>In play <span class="n" id="freshN"></span> <small style="text-transform:none;letter-spacing:0">· first signal per name, levels locked · stays up until it resolves · grey = after 10:30 CT</small></h2>
 <div class="tbl"><table class="fresh">
-  <thead><tr><th>Call</th><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry ≥</th><th>Stop</th><th>T1 / T2</th><th>Now</th><th>R now · best</th></tr></thead>
+  <thead><tr><th>Call</th><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry ≥</th><th>Stop</th><th>Target · out by</th><th>Now</th><th>R now · best</th></tr></thead>
   <tbody id="fresh"></tbody>
 </table></div>
 </div>
@@ -214,6 +215,14 @@ const RAW = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/scan.json`;
 const $ = id => document.getElementById(id);
 const ALERT_RV = 1.5;   // only ding for signals with real volume behind them (74-signal scoreboard, Nov 13)
 // IGNITION is judged on its own burst pace (3x+), not the day's rel vol (PAR Nov 16: 13x pace, 0.97x day).
+// Exit plan and risk cap (Nov 16 backtest): take +1.5%, keep the card's stop, out after 20 min.
+const TP_PCT = 1.5, HOLD_MIN = 20, RISK_CAP = 2.5;
+const tgt = e => e * (1 + TP_PCT / 100);
+const addMin = (hhmm, m) => { const [h, mm] = hhmm.split(":").map(Number), t = h * 60 + mm + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+// Tags only, never a gate: IN PLAY = already traded a full normal day (1-5x) with a live 5m bar, after 9:00.
+// OPEN = an opening-range trigger 8:35-9:00 with a stop inside the cap.
+const inPlay = r => ctHM() >= 900 && (r.rel_vol_day || 0) >= 1 && r.rel_vol_day < 5 && (r.vol_surge || 0) >= 1 && r.setup !== "BREAK";
+const openTag = r => /^ORB/.test(r.setup || "") && ctHM() < 900 && r.risk_pct != null && r.risk_pct <= RISK_CAP;
 const loudEnough = r => r.setup === "IGNITION" ? (r.vol_pace || 0) >= 3 : (r.rel_vol || 0) >= ALERT_RV;
 const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT"];
 const LOSS_HALF = -200, LOSS_STOP = -400, WIN_DONE = 1200;   // Rule 9 + half-size step
@@ -358,11 +367,12 @@ function verdict(r, price){
     const R = r.entry - r.stop, past = (price - r.entry) / R;
     if (price >= r.entry && past > 0.3) return ["SKIP", `Ran ${fmt(past,1)}R past ${fmt(r.entry)}: missed, don't chase`];
     if (price < r.stop) return ["SKIP", `Under the ${fmt(r.stop)} stop level: setup broken`];
+    if (r.risk_pct != null && r.risk_pct > RISK_CAP) return ["SKIP", `Stop ${fmt(r.risk_pct,1)}% away (cap ${RISK_CAP}%): losses run bigger than the +${TP_PCT}% target`];
     const A = (scan.armed || []).find(a => a.sym === r.sym);
     if (SIGNALS.includes(r.setup) || (A && price >= r.entry)) {
       if (!loudEnough(r)) return ["WAIT", r.setup === "IGNITION" ? `Burst faded (pace ${fmt(r.vol_pace,1)}x < 3x)` : `Trigger on thin volume (rel vol ${fmt(r.rel_vol,1)}x < ${ALERT_RV}x)`];
       if (price < r.entry) return ["WAIT", `Buy stop ${fmt(r.entry)} · stop ${fmt(r.stop)}`];
-      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)}${half}${r.catalyst_strength === "flow" ? " · NO NEWS, verify" : ""}`];
+      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · target ${fmt(tgt(r.entry))} (+${TP_PCT}%) · out by ${addMin(String(Math.floor(ctHM()/100)).padStart(2,"0")+":"+String(ctHM()%100).padStart(2,"0"), HOLD_MIN)}${half}${r.catalyst_strength === "flow" ? " · NO NEWS, verify" : ""}`];
     }
     if (r.setup === "A-WATCH" && r.room_r != null && r.room_r < 2) return ["SKIP", `Only ${fmt(r.room_r,1)}R to the ${fmt(r.sess_high)} high: pays less than it risks`];
     if (A) return ["WAIT", `Armed: buy stop ${fmt(A.entry)} limit ${fmt(A.buy_limit)} · stop ${fmt(A.stop)}`];
@@ -401,8 +411,9 @@ function card(r){
   const lv = r.entry ? `<div class="levels">
       <div class="lv entry"><i>Entry ≥</i><b>${fmt(r.entry)}</b></div>
       <div class="lv stop"><i>Stop</i><b>${fmt(r.stop)}</b></div>
-      <div class="lv"><i>T1</i><b>${fmt(r.t1)}</b></div>
-      <div class="lv"><i>Risk</i><b>${fmt(r.risk_pct,1)}%</b></div></div>` :
+      <div class="lv"><i>Target +${TP_PCT}%</i><b>${fmt(tgt(r.entry))}</b></div>
+      <div class="lv${r.risk_pct > RISK_CAP ? " stop" : ""}"><i>Risk${r.risk_pct > RISK_CAP ? " &gt; cap" : ""}</i><b>${fmt(r.risk_pct,1)}%</b></div></div>
+      <div class="size">Exit plan: target ${fmt(tgt(r.entry))} or stop ${fmt(r.stop)}, whichever first; otherwise out ${HOLD_MIN} min after the fill.</div>` :
     r.pullback_zone ? `<div class="levels"><div class="lv entry" style="grid-column:span 2"><i>Pullback zone</i><b>${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}</b></div><div class="lv"><i>${r.vwap_basis==="time"?"TWAP*":"VWAP"}</i><b>${fmt(r.vwap)}</b></div><div class="lv"><i>Ext</i><b>${fmt(r.ext_pct,1)}%</b></div></div>` : "";
   const cat = r.catalyst ? `<div class="cat"><a href="${esc(r.catalyst.url)}" target="_blank" rel="noopener">${esc(r.catalyst.headline)}</a> <small>${esc(r.catalyst.source || "")} · ${esc(r.catalyst.time)}</small></div>`
     : `<div class="cat"><small>${r.catalyst_strength === "squeeze" ? "No news. Low-float volume squeeze." : "No company news found."}</small></div>`;
@@ -414,7 +425,7 @@ function card(r){
     <div class="verdict ${V}"><b>${V}</b><span>${esc(why)}</span></div>
     <div class="top"><div style="min-width:0"><div class="sym">${esc(r.sym)}</div><div class="nm">${esc(r.name)}</div></div>
       <div class="px"><div class="p">${fmt(price, price < 10 ? 3 : 2)}</div><div class="${chg >= 0 ? "up" : "dn"}">${chg >= 0 ? "+" : ""}${fmt(chg,1)}%</div>${L ? `<div class="live">LIVE</div>` : ""}</div></div>
-    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">AFTER 10:30 · half size or skip</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
+    <div><span class="chip ${esc(r.setup)}">${esc(r.setup)}</span>${r.late && SIGNALS.includes(r.setup) ? ` <span class="chip LATE">AFTER 10:30 · half size or skip</span>` : ""}${inPlay(r) ? ` <span class="chip inplay">IN PLAY</span>` : ""}${openTag(r) ? ` <span class="chip open">OPEN</span>` : ""}${r.rule8 === true ? ` <span class="chip cat">Rule 8 ✓</span>` : r.rule8 === false ? ` <span class="chip warnf">Rule 8 ✗</span>` : ""}</div>
     <div class="note">${esc(r.setup_note || "")}</div>
     ${chase}${armed}${lv}${size}
     ${sparkSVG(r.spark)}
@@ -566,11 +577,15 @@ function posCard(p){
   const trail = row?.ema9 ? r2(Math.max(p.entry, row.ema9 * 0.995)) : p.entry;
   const ct = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })), mins = ct.getHours() * 60 + ct.getMinutes();
   let orders, next, cls = "";
+  const tp = r2(tgt(p.entry)), outAt = p.opened + HOLD_MIN * 60000, left = Math.round((outAt - Date.now()) / 60000);
+  const scalp = `Plan: target <b>${fmt(tp)}</b> (+${TP_PCT}%) · stop <b>${fmt(p.stop)}</b> · out by <b>${new Date(outAt).toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"2-digit",minute:"2-digit"})}</b> (${left > 0 ? left + " min left" : "time's up"})`;
+  if (!p.half && price >= tp) { alertOnce(p.sym + "|tp", `${p.sym} hit target ${fmt(tp)}`, "Sell all: plan target reached."); }
+  if (!p.half && left <= 0) { alertOnce(p.sym + "|sellby", `${p.sym} sell-by reached`, "20 minutes up. Sell all at the bid."); }
   if (!p.half) {
     const beNow = price >= plus1R && p.stop < p.entry;
     orders = [
       [`STOP-LIMIT SELL <b>${open}</b> @ ${fmt(p.stop)} · limit ${fmt(stopLimit(p.stop))}`, "Protects ALL shares"],
-      [`At T1 ${fmt(p.t1)}: cancel the stop, LIMIT SELL <b>${tgtHalf}</b>, re-stop the rest at ${fmt(p.entry)}`, "Alert-driven, no resting order"],
+      [`At target ${fmt(tp)}: cancel the stop, LIMIT SELL all <b>${open}</b>`, "Alert-driven, no resting order"],
     ];
     if (price <= p.stop * 1.003) { next = `At the stop. Confirm all ${open} shares sold; if the stop-limit didn't fill, sell with a limit at the bid.`; cls = "warn";
       alertOnce(p.sym + "|stop|" + p.stop, `${p.sym} at stop ${fmt(p.stop)}`, "Confirm the full position is out."); }
@@ -578,7 +593,9 @@ function posCard(p){
       alertOnce(p.sym + "|t1", `${p.sym} hit T1 ${fmt(p.t1)}`, "Sell half, re-stop the rest at breakeven."); }
     else if (beNow) { next = `Up 1R. Replace the stop on all ${open} shares with ${fmt(p.entry)} (breakeven).`; cls = "go";
       alertOnce(p.sym + "|1r", `${p.sym} +1R at ${fmt(plus1R)}`, `Move the stop to breakeven ${fmt(p.entry)}.`); }
-    else next = `Hold. Next action at ${fmt(plus1R)} (+1R): stop to breakeven. Target ${fmt(p.t1)}.`;
+    else if (price >= tp) { next = `Plan target ${fmt(tp)} reached. Sell all ${open} with a limit at the bid.`; cls = "go"; }
+    else if (left <= 0) { next = `${HOLD_MIN} minutes are up. Sell all ${open} now; the trade had its chance.`; cls = "warn"; }
+    else next = `Hold. Target ${fmt(tp)} or stop ${fmt(p.stop)}, out in ${left} min either way.`;
   } else {
     orders = [
       [`STOP-LIMIT SELL <b>${open}</b> @ ${fmt(Math.max(p.stop, p.entry))} · limit ${fmt(stopLimit(Math.max(p.stop, p.entry)))}`, "Protects the rest"],
@@ -597,6 +614,7 @@ function posCard(p){
     <div class="pnl ${total >= 0 ? "up" : "dn"}">${fmtUSD(total)}<small>${rNow >= 0 ? "+" : ""}${fmt(rNow, 2)}R</small></div>
     <div class="orders">${orders.map(([t, tag]) => `<div class="order"><span>${t}</span><span class="tag">${esc(tag)}</span></div>`).join("")}</div>
     <div class="next ${cls}">${next}</div>
+    ${p.half ? "" : `<div class="size">${scalp}</div>`}
     <div class="levels"><div class="lv"><i>+1R</i><b>${fmt(plus1R)}</b></div><div class="lv"><i>T1</i><b>${fmt(p.t1)}</b></div><div class="lv"><i>T2</i><b>${fmt(p.t2)}</b></div><div class="lv"><i>VWAP</i><b>${fmt(row?.vwap)}</b></div></div>
     <div class="pbtns">${p.half ? "" : `<button type="button" data-sym="${esc(p.sym)}" data-act="t1">T1 half filled</button>`}
       <button type="button" data-sym="${esc(p.sym)}" data-act="edit">Edit</button>
@@ -649,6 +667,9 @@ function playCall(x, p){
   if (x.status === "no_fill") return ["SKIP", "Never traded through entry (expired)"];
   if (x.status === "unresolved") return ["SKIP", "Unresolved"];
   if (x.status === "open") {
+    const outBy = x.fill_time_ct ? addMin(x.fill_time_ct, HOLD_MIN) : null, nowHM = ctHM();
+    if (p != null && p >= tgt(x.entry)) return ["SKIP", `Target ${fmt(tgt(x.entry))} reached: take it if you're in`];
+    if (outBy && nowHM >= +outBy.replace(":", "")) return ["SKIP", `Past the ${outBy} sell-by: out if you're in`];
     if (x.t1_time_ct) return ["WAIT", `T1 hit ${x.t1_time_ct}: half off, stop to ${fmt(x.entry)} · T2 ${fmt(x.t2)}`];
     if (r != null && r > 0.3) return ["SKIP", `Running ${fmt(r, 1)}R past entry: missed, don't chase`];
     if (r != null && p >= x.entry) return ["NOW", `Still in the window: buy ≤ ${fmt(x.entry + 0.25 * R)} · stop ${fmt(x.stop)}`];
@@ -656,6 +677,7 @@ function playCall(x, p){
   }
   // pending: signalled, hasn't traded through entry yet
   if (r != null && p < x.stop) return ["SKIP", "Under the stop before filling: setup broken"];
+  if (R / x.entry * 100 > RISK_CAP) return ["SKIP", `Stop ${fmt(R / x.entry * 100, 1)}% away (cap ${RISK_CAP}%)`];
   return ["WAIT", `Buy stop ${fmt(x.entry)} · stop ${fmt(x.stop)}`];
 }
 function renderFresh(){
@@ -674,7 +696,7 @@ function renderFresh(){
     const best = x.mfe_r != null ? fmt(x.mfe_r, 1) + "R" : "—";
     return `<tr style="${late ? "opacity:.55" : ""}"><td><span class="vd ${V}">${V}</span> <small>${esc(why)}</small></td><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b>${x.catalyst_strength === "flow" ? ' <span class="chip warnf">NO NEWS</span>' : ""}</td>
       <td><span class="chip ${esc(x.setup)}">${esc(x.setup)}</span>${late ? ' <span class="chip LATE">LATE</span>' : ""}</td>
-      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(x.t1)} / ${fmt(x.t2)}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
+      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(tgt(x.entry))} · ${x.fill_time_ct ? addMin(x.fill_time_ct, HOLD_MIN) : "+" + HOLD_MIN + "m"}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
       <td class="${rn == null ? "" : rn >= 0 ? "up" : "dn"}">${rn == null ? "—" : (rn >= 0 ? "+" : "") + fmt(rn, 1) + "R"} · ${best}</td></tr>`;
   }).join("");
 }
