@@ -605,7 +605,7 @@ def analyze_bars(df, row, session):
         row["setup"] = "B-WATCH"
         off = (sess_high - price) / sess_high * 100
         heavy = max(surge or 0, (pace or 0) / 1.5) >= SURGE_MIN
-        row["setup_note"] = (f"{off:.1f}% under the high {sess_high:.2f}. "
+        row["setup_note"] = ((f"{off:.1f}% under the high {sess_high:.2f}. " if off >= 0.05 else f"At the high {sess_high:.2f}. ")
                              + ("Volume is on the sell side; wait for a green push through the high."
                                 if heavy and not (buy_surge or buy_pace) else
                                 "Volume has dried up at the high: a stall, not a build."
