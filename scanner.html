@@ -363,6 +363,7 @@ function verdict(r, price){
       if (price < r.entry) return ["WAIT", `Buy stop ${fmt(r.entry)} · stop ${fmt(r.stop)}`];
       return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)}${half}`];
     }
+    if (r.setup === "A-WATCH" && r.room_r != null && r.room_r < 2) return ["SKIP", `Only ${fmt(r.room_r,1)}R to the ${fmt(r.sess_high)} high: pays less than it risks`];
     if (A) return ["WAIT", `Armed: buy stop ${fmt(A.entry)} limit ${fmt(A.buy_limit)} · stop ${fmt(A.stop)}`];
     return ["WAIT", `Needs a break of ${fmt(r.entry)}${loudEnough(r) ? "" : " on more volume"} · stop ${fmt(r.stop)}`];
   }

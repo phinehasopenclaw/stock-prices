@@ -587,9 +587,11 @@ def analyze_bars(df, row, session):
                                  "Skip unless it clears the high.")
     elif pulled_back:
         row["setup"] = "A-WATCH"
-        row["setup_note"] = (f"Holding support near {support:.2f}. Wait for a green bar on volume."
-                             + (" Red volume drying up." if drying else " Red volume still heavy."))
         lv(h[last] + 0.01, recent_low * 0.995, sess_high)
+        room = row.get("room_r") or 0
+        row["setup_note"] = (f"Holding support near {support:.2f}. Wait for a green bar on volume."
+                             + (" Red volume drying up." if drying else " Red volume still heavy.")
+                             + (f" Only {room:.1f}R to the high {sess_high:.2f}: not worth arming." if room < 2 else ""))
     elif near_high and at_high and (buy_surge or buy_pace):
         # Breakout = trading AT the high now, on buying volume (green completed bar or a
         # rising forming bar). Volume near the high on a red bar is selling, not a breakout.
@@ -1342,6 +1344,8 @@ def arm_levels(session, survivors):
     armed = {}
     if session == "REGULAR" and dt.datetime.now(CT).time() < dt.time(14, 30):
         for r in survivors:
+            if r.get("setup") == "A-WATCH" and (r.get("room_r") or 0) < 2:
+                continue   # a pullback buy with < 2R to the high pays less than it risks (VTSI Nov 16)
             if (r.get("setup") in ARM_SETUPS and r.get("entry") and r.get("stop")
                     and r["entry"] > r["stop"] and (r.get("rel_vol") or 0) >= ARM_MIN_RV
                     and not r.get("bad_headline") and r.get("catalyst_strength") != "flow"):
