@@ -728,6 +728,7 @@ function renderScore(){
       <td class="${v.avg_r_full >= 0 ? "up" : "dn"}">${fmt(v.avg_r_full, 2)}R</td><td class="${v.avg_r_split >= 0 ? "up" : "dn"}">${fmt(v.avg_r_split, 2)}R</td>
       <td class="${(v.avg_r_1r ?? 0) >= 0 ? "up" : "dn"}">${v.avg_r_1r == null ? "—" : fmt(v.avg_r_1r, 2) + "R"}${v.n_1r && v.n_1r < v.n ? `<small> (${v.n_1r})</small>` : ""}</td>
       <td>${v.avg_mfe_r == null ? "—" : fmt(v.avg_mfe_r, 2) + "R"}</td>
+      <td>${v.scalp ? pct(v.scalp.win_rate) : "—"}</td><td class="${(v.scalp?.avg_pct ?? 0) >= 0 ? "up" : "dn"}">${v.scalp ? (v.scalp.avg_pct >= 0 ? "+" : "") + fmt(v.scalp.avg_pct, 2) + "%" + `<small> (${v.scalp.n})</small>` : "—"}</td>
       <td class="${v.avg_r_split >= 0 ? "up" : "dn"}">${fmtUSD(v.avg_r_split * risk)}</td></tr>`).join("");
   const tRows = today.map(x => {
     const r = x.r_split ?? x.mark_r;
@@ -737,7 +738,7 @@ function renderScore(){
   }).join("");
   $("score").innerHTML = `<p class="lead">${all.n} scored signal${all.n === 1 ? "" : "s"} over ${st.days || 0} trading day${st.days === 1 ? "" : "s"}${st.since ? " since " + esc(st.since) : ""}${st.no_fill ? ` · ${st.no_fill} never traded through entry` : ""}.
       Scored mechanically from 5-minute bars, before slippage. Dollar column = average R × your $${risk} risk. Treat it as noise until there are 30+ signals.</p>
-    ${rows ? `<div class="tbl"><table><thead><tr><th>Group</th><th>Signals</th><th>Win</th><th>Avg R, all at T1</th><th>Avg R, split exit</th><th>Avg R, half at +1R</th><th>Avg best move</th><th>$/trade</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+    ${rows ? `<div class="tbl"><table><thead><tr><th>Group</th><th>Signals</th><th>Win</th><th>Avg R, all at T1</th><th>Avg R, split exit</th><th>Avg R, half at +1R</th><th>Avg best move</th><th>Card plan win</th><th>Card plan avg</th><th>$/trade</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
     ${tRows ? `<h2 style="margin-top:16px">Today's signals</h2><div class="tbl"><table><thead><tr><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry</th><th>Stop</th><th>T1</th><th>Status</th><th>R</th><th>When</th></tr></thead><tbody>${tRows}</tbody></table></div>` : ""}`;
 }
 

@@ -867,6 +867,23 @@ def load_signals():
     return _signals
 
 
+TP_PCT, HOLD_MIN, RISK_CAP = 1.5, 20, 2.5   # exit plan + stop cap from the Nov 16 backtest
+
+
+def signal_tags(r, now_ct):
+    """Recorded on every signal so the IN PLAY / OPEN tags and the stop cap can be scored later."""
+    risk_pct = (r["entry"] - r["stop"]) / r["entry"] * 100 if r.get("entry") and r.get("stop") else None
+    rvd = r.get("rel_vol_day")
+    t = now_ct.time()
+    return {
+        "risk_pct": fnum(risk_pct, 2), "rel_vol_day": rvd,
+        "in_play": bool(t >= dt.time(9, 0) and rvd is not None and 1 <= rvd < 5
+                        and (r.get("vol_surge") or 0) >= 1 and r.get("setup") != "BREAK"),
+        "open_tag": bool(str(r.get("setup", "")).startswith("ORB") and t < dt.time(9, 0)
+                         and risk_pct is not None and risk_pct <= RISK_CAP),
+    }
+
+
 def log_new_signals(survivors):
     sigs = load_signals()
     now_ct = dt.datetime.now(CT)
@@ -897,6 +914,7 @@ def log_new_signals(survivors):
             "vol_pace": r.get("vol_pace"), "room_r": r.get("room_r"),
             "status": "pending",
         }
+        sig.update(signal_tags(r, now_ct))
         sig["repeat"] = r["sym"] in signalled   # later signals on a name already flagged today: logged, not pushed
         sigs.append(sig)
         recent.add((r["sym"], r["setup"]))
@@ -914,6 +932,8 @@ def push_worthy(r):
     names are tagged to verify. Scoreboard Nov 13-16: no-news IGNITION 12/36 fills reached +1R.
     Every other setup still needs day rel vol >= PUSH_MIN_RV and a real catalyst (no-news
     B-BREAKOUT: 8/83 reached +1R)."""
+    if (r.get("risk_pct") or 0) > RISK_CAP:
+        return False   # wide stops carried the losses in the Nov 16 backtest
     if r.get("setup") == "IGNITION":
         return (r.get("vol_pace") or 0) >= IGNITION_PACE
     return (r.get("rel_vol") or 0) >= PUSH_MIN_RV and r.get("catalyst_strength") != "flow"
@@ -992,6 +1012,36 @@ def shadow_1r(sig, bars):
         sig["mfe_r"] = round(mfe, 2)
 
 
+def shadow_scalp(sig, bars):
+    """The exit plan on the cards, scored on 5m bars: fill at the entry (or the open if it
+    gaps above), then +TP_PCT target / the signal stop / out at the close of the bar that
+    ends HOLD_MIN after the fill. Same bar touching both: the stop counts. Records % P&L."""
+    if "scalp_pct" in sig:
+        return
+    entry, stop = sig["entry"], sig["stop"]
+    px = None
+    for i, (ts, b) in enumerate(bars.iterrows()):
+        hi, lo, op, cl = float(b["High"]), float(b["Low"]), float(b["Open"]), float(b["Close"])
+        if px is None:
+            if hi < entry:
+                continue
+            px, t0 = max(entry, op), ts
+            if lo <= stop:
+                sig["scalp_pct"] = round((stop - px) / px * 100, 2)
+                return
+            continue
+        tp = px * (1 + TP_PCT / 100)
+        if lo <= stop:
+            sig["scalp_pct"] = round((min(stop, op) - px) / px * 100, 2)
+            return
+        if hi >= tp:
+            sig["scalp_pct"] = round((max(tp, op) - px) / px * 100, 2)
+            return
+        if (ts - t0).total_seconds() >= (HOLD_MIN - 5) * 60:
+            sig["scalp_pct"] = round((cl - px) / px * 100, 2)
+            return
+
+
 def resolve_signal(sig, df):
     """Walk 5m bars after the signal. Conservative: if one bar touches both stop and
     target, the stop is assumed to have hit first."""
@@ -1001,6 +1051,10 @@ def resolve_signal(sig, df):
         return
     try:
         shadow_1r(sig, bars)
+    except Exception:
+        pass
+    try:
+        shadow_scalp(sig, bars)
     except Exception:
         pass
     entry, stop = sig["entry"], sig["stop"]
@@ -1099,6 +1153,17 @@ def close_stale_signals():
             x["status"] = "unresolved"
 
 
+def scalp_agg(rows):
+    """The card exit plan (+1.5% / stop / 20 min) in % per trade."""
+    sp = [x["scalp_pct"] for x in rows if x.get("scalp_pct") is not None]
+    if not sp:
+        return None
+    w = [v for v in sp if v > 0.05]
+    l = [v for v in sp if v < -0.05]
+    return {"n": len(sp), "win_rate": round(len(w) / len(sp), 3), "avg_pct": round(sum(sp) / len(sp), 3),
+            "avg_win": round(sum(w) / len(w), 2) if w else None, "avg_loss": round(sum(l) / len(l), 2) if l else None}
+
+
 def signal_stats():
     done = [x for x in load_signals() if x["status"] in ("win", "loss", "time", "scratch")]
 
@@ -1113,7 +1178,8 @@ def signal_stats():
                 "avg_r_full": round(sum(rf) / len(rows), 2), "avg_r_split": round(sum(rs) / len(rows), 2),
                 "total_r_full": round(sum(rf), 2), "total_r_split": round(sum(rs), 2),
                 "avg_r_1r": round(sum(r1) / len(r1), 2) if r1 else None, "n_1r": len(r1),
-                "avg_mfe_r": round(sum(mf) / len(mf), 2) if mf else None}
+                "avg_mfe_r": round(sum(mf) / len(mf), 2) if mf else None,
+                "scalp": scalp_agg(rows)}
 
     clean = lambda x: x.get("catalyst_strength") in ("strong", "squeeze") and not x.get("bad_headline")
     groups = {
@@ -1132,6 +1198,10 @@ def signal_stats():
         "rel vol < 1.5 at signal": [x for x in done if (x.get("rel_vol") or 0) < 1.5],
         "first signal on the name": [x for x in done if not x.get("repeat")],
         "repeat signal on the name": [x for x in done if x.get("repeat")],
+        "IN PLAY tag": [x for x in done if x.get("in_play")],
+        "OPEN tag (ORB 8:35-9:00, stop <= 2.5%)": [x for x in done if x.get("open_tag")],
+        "stop <= 2.5%": [x for x in done if x.get("risk_pct") is not None and x["risk_pct"] <= RISK_CAP],
+        "stop > 2.5%": [x for x in done if (x.get("risk_pct") or 0) > RISK_CAP],
     }
     all_sigs = load_signals()
     return {
@@ -1355,6 +1425,7 @@ def make_signal(r, setup, now_ct, price):
         "prime": now_ct.time() < PRIME_END_CT,
         "vol_pace": r.get("vol_pace"), "room_r": r.get("room_r"),
         "status": "pending",
+        **signal_tags(r, now_ct),
     }
 
 
@@ -1363,6 +1434,8 @@ def arm_levels(session, survivors):
     armed = {}
     if session == "REGULAR" and dt.datetime.now(CT).time() < dt.time(14, 30):
         for r in survivors:
+            if (r.get("risk_pct") or 0) > RISK_CAP:
+                continue   # stop more than 2.5% away: the +1.5% target can't pay for it
             if r.get("setup") == "A-WATCH" and (r.get("room_r") or 0) < 2:
                 continue   # a pullback buy with < 2R to the high pays less than it risks (VTSI Nov 16)
             if r.get("setup") == "B-WATCH" and (r.get("vol_surge") or 0) < B_ARM_MIN_SURGE:
