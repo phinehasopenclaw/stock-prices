@@ -43,6 +43,7 @@ AVGVOL_MIN = 150_000
 SURGE_MIN = 1.5            # completed-bar volume vs baseline for A-TRIGGER / B-BREAKOUT
 IGNITION_PACE = 3.0        # forming-bar volume pace vs baseline for IGNITION
 ORB_START_CT, ORB_END_CT = dt.time(8, 35), dt.time(9, 30)
+ORB_MAX_RANGE = 4.0        # % first-candle range above which the ORB entry is too late and too wide
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
@@ -213,6 +214,17 @@ def screener_pages(sort_field, pages, session_state):
     return quotes
 
 
+def predefined(name):
+    for attempt in range(2):
+        try:
+            return yf.screen(name, count=250).get("quotes", [])
+        except Exception as e:
+            log(f"screen {name} attempt {attempt}: {e!r}")
+            time.sleep(3)
+    _state["errors"].append(f"screener {name} failed")
+    return []
+
+
 def build_universe():
     """Returns (session, rows). session is PRE / REGULAR / POST / CLOSED."""
     # Probe market state with one small page.
@@ -226,6 +238,9 @@ def build_universe():
         # Top 1,000 by volume plus the top 500 gainers: wide enough to see liquid names that
         # turn and run before they're up big on the day (VKTX Nov 13).
         quotes = first + screener_pages("dayvolume", 4, session)[250:] + screener_pages("percentchange", 2, session)
+        # Yahoo's own gainer lists catch large caps the volume/percent pages ranked out at the
+        # open (TSN +10% seen 4 min late, HTHT +9% seen 41 min late on Nov 16).
+        quotes = predefined("day_gainers") + predefined("small_cap_gainers") + quotes
     else:
         # Before the open, percent-change sorting is yesterday's; sweep wide.
         quotes = first + screener_pages("dayvolume", 11, session)[250:]
@@ -464,6 +479,10 @@ def analyze_bars(df, row, session):
     pulled_back = sess_high > price * 1.025 and recent_low <= support * 1.015
     trigger = green and surge is not None and surge >= SURGE_MIN and last >= 1 and c[last] > h[last - 1]
     near_high = price >= sess_high * 0.985
+    at_high = price >= sess_high * 0.998
+    forming_up = forming is not None and price > float(forming["Open"])
+    buy_surge = green and (surge or 0) >= SURGE_MIN
+    buy_pace = forming_up and (pace or 0) / 1.5 >= SURGE_MIN
     late = now_ct.time() >= PRIME_END_CT
     row["late"] = late
 
@@ -505,7 +524,11 @@ def analyze_bars(df, row, session):
         o_hi, o_lo = float(first["High"]), float(first["Low"])
         entry, stop = o_hi + 0.01, o_lo - 0.01
         risk = entry - stop
-        if risk > 0 and risk / entry <= 0.08:
+        if o_lo > 0 and (o_hi - o_lo) / o_lo * 100 > ORB_MAX_RANGE:
+            # A wide first candle IS the move (HTHT +6.4% in 5 min): its high is a late entry
+            # with a wide stop. Skip the ORB; the pullback-to-VWAP/EMA9 setups take over.
+            row["orb_skipped"] = f"First 5-min candle ranged {(o_hi - o_lo) / o_lo * 100:.1f}% (> {ORB_MAX_RANGE:g}%): ORB skipped"
+        elif risk > 0 and risk / entry <= 0.08:
             if price < entry:
                 row["setup"] = "ORB-WATCH"
                 row["setup_note"] = (f"First 5-min candle closed green (Rule 8 passed). "
@@ -567,14 +590,21 @@ def analyze_bars(df, row, session):
         row["setup_note"] = (f"Holding support near {support:.2f}. Wait for a green bar on volume."
                              + (" Red volume drying up." if drying else " Red volume still heavy."))
         lv(h[last] + 0.01, recent_low * 0.995, sess_high)
-    elif near_high and max(surge or 0, (pace or 0) / 1.5) >= SURGE_MIN:
+    elif near_high and at_high and (buy_surge or buy_pace):
+        # Breakout = trading AT the high now, on buying volume (green completed bar or a
+        # rising forming bar). Volume near the high on a red bar is selling, not a breakout.
         row["setup"] = "B-BREAKOUT"
-        vtxt = f"{surge:.1f}x volume" if (surge or 0) >= SURGE_MIN else f"{pace:.1f}x volume pace"
-        row["setup_note"] = f"Pressing the high {sess_high:.2f} on {vtxt}. Half size." + late_note()
+        vtxt = f"{surge:.1f}x volume" if buy_surge else f"{pace:.1f}x volume pace"
+        row["setup_note"] = f"Breaking the high {sess_high:.2f} on {vtxt}. Half size." + late_note()
         lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995)
     elif near_high:
         row["setup"] = "B-WATCH"
-        row["setup_note"] = f"At the high {sess_high:.2f} without a volume surge yet."
+        off = (sess_high - price) / sess_high * 100
+        heavy = max(surge or 0, (pace or 0) / 1.5) >= SURGE_MIN
+        row["setup_note"] = (f"{off:.1f}% under the high {sess_high:.2f}. "
+                             + ("Volume is on the sell side; wait for a green push through the high."
+                                if heavy and not (buy_surge or buy_pace) else
+                                "Needs a break of the high on volume."))
         lv(sess_high + 0.01, min(l[max(0, last - 2):last + 1]) * 0.995)
     else:
         row["setup"] = "HOLDING"
