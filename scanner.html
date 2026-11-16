@@ -155,9 +155,9 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
 </header>
 
 <div id="freshWrap" hidden>
-<h2>Fresh signals <span class="n" id="freshN"></span> <small style="text-transform:none;letter-spacing:0">· stay up 15 min · grey = after 10:30 CT</small></h2>
+<h2>In play <span class="n" id="freshN"></span> <small style="text-transform:none;letter-spacing:0">· first signal per name, levels locked · stays up until it resolves · grey = after 10:30 CT</small></h2>
 <div class="tbl"><table class="fresh">
-  <thead><tr><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry ≥</th><th>Stop</th><th>T1</th><th>Now</th><th>Status</th></tr></thead>
+  <thead><tr><th>Call</th><th>Time</th><th>Ticker</th><th>Setup</th><th>Entry ≥</th><th>Stop</th><th>T1 / T2</th><th>Now</th><th>R now · best</th></tr></thead>
   <tbody id="fresh"></tbody>
 </table></div>
 </div>
@@ -640,15 +640,42 @@ function renderPnl(){
   $("otherBtn").onclick = () => openModal("Untracked P&L today", [{ k: "v", label: "Closed P&L from trades not tracked here ($, loss is negative)", v: d.other }],
     "Counts toward the $400 loss limit and the $1,200 done trigger. Resets tomorrow.", "Save", v => { if (!isNaN(v.v)) store.set("other_" + todayCT(), String(v.v)); });
 }
+// In play: the FIRST signal on each name today, with its entry/stop/targets locked, tracked
+// until it resolves. Later signals on the same name don't move the levels (PAR Nov 16).
+function playCall(x, p){
+  const R = x.entry - x.stop, r = p != null && R > 0 ? (p - x.entry) / R : null;
+  const done = { win: "WIN", loss: "LOSS", time: "TIME", scratch: "SCRATCH" }[x.status];
+  if (done) return ["SKIP", `Closed ${done} ${x.r_split != null ? (x.r_split >= 0 ? "+" : "") + fmt(x.r_split, 1) + "R" : ""} at ${x.exit_time_ct || "—"}`];
+  if (x.status === "no_fill") return ["SKIP", "Never traded through entry (expired)"];
+  if (x.status === "unresolved") return ["SKIP", "Unresolved"];
+  if (x.status === "open") {
+    if (x.t1_time_ct) return ["WAIT", `T1 hit ${x.t1_time_ct}: half off, stop to ${fmt(x.entry)} · T2 ${fmt(x.t2)}`];
+    if (r != null && r > 0.3) return ["SKIP", `Running ${fmt(r, 1)}R past entry: missed, don't chase`];
+    if (r != null && p >= x.entry) return ["NOW", `Still in the window: buy ≤ ${fmt(x.entry + 0.25 * R)} · stop ${fmt(x.stop)}`];
+    return ["WAIT", `Back under entry: buy stop ${fmt(x.entry)} · stop ${fmt(x.stop)}`];
+  }
+  // pending: signalled, hasn't traded through entry yet
+  if (r != null && p < x.stop) return ["SKIP", "Under the stop before filling: setup broken"];
+  return ["WAIT", `Buy stop ${fmt(x.entry)} · stop ${fmt(x.stop)}`];
+}
 function renderFresh(){
-  const now = Date.now() / 1000, rows = (scan.signals_today || []).filter(x => now - x.ts <= 15 * 60).sort((a, b) => b.ts - a.ts);
+  const now = Date.now() / 1000, first = {};
+  for (const x of (scan.signals_today || []).slice().sort((a, b) => a.ts - b.ts)) if (!first[x.sym]) first[x.sym] = x;
+  const live = s => s === "pending" || s === "open";
+  const rows = Object.values(first).filter(x => live(x.status) || now - x.ts <= 15 * 60 ||
+      (x.exit_time_ct && now - x.ts <= 120 * 60 && ctHM() - +x.exit_time_ct.replace(":", "") <= 20))
+    .sort((a, b) => (live(b.status) - live(a.status)) || (b.ts - a.ts));
   $("freshWrap").hidden = !rows.length;
   $("freshN").textContent = rows.length ? `· ${rows.length}` : "";
   $("fresh").innerHTML = rows.map(x => {
     const L = quoteFor(x.sym), row = (scan.survivors || []).find(r => r.sym === x.sym), p = L ? L.p : row?.price;
-    const late = !x.prime;
-    return `<tr style="${late ? "opacity:.55" : ""}"><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b></td><td><span class="chip ${esc(x.setup)}">${esc(x.setup)}</span>${late ? ' <span class="chip LATE">LATE</span>' : ""}</td>
-      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(x.t1)}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td><td><span class="st ${esc(x.status)}">${esc(x.status)}</span></td></tr>`;
+    const late = !x.prime, R = x.entry - x.stop, rn = p != null && R > 0 ? (p - x.entry) / R : null;
+    const [V, why] = playCall(x, p);
+    const best = x.mfe_r != null ? fmt(x.mfe_r, 1) + "R" : "—";
+    return `<tr style="${late ? "opacity:.55" : ""}"><td><span class="vd ${V}">${V}</span> <small>${esc(why)}</small></td><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b>${x.catalyst_strength === "flow" ? ' <span class="chip warnf">NO NEWS</span>' : ""}</td>
+      <td><span class="chip ${esc(x.setup)}">${esc(x.setup)}</span>${late ? ' <span class="chip LATE">LATE</span>' : ""}</td>
+      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(x.t1)} / ${fmt(x.t2)}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
+      <td class="${rn == null ? "" : rn >= 0 ? "up" : "dn"}">${rn == null ? "—" : (rn >= 0 ? "+" : "") + fmt(rn, 1) + "R"} · ${best}</td></tr>`;
   }).join("");
 }
 function renderPositions(){
