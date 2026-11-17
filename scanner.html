@@ -111,6 +111,8 @@ footer{margin-top:24px;color:var(--muted);font-size:12px}
 .next{font-size:13px;padding:8px 10px;border-radius:6px;background:var(--info-bg);color:var(--fg)}
 .next.go{background:var(--good-bg)}.next.warn{background:var(--bad-bg)}
 .chip.inplay{background:var(--good-bg);color:var(--good);font-weight:700}.chip.open{background:var(--info-bg);color:var(--info);font-weight:700}
+.verdict.WATCH{background:var(--info-bg);color:var(--fg)}.verdict.WATCH b{color:var(--info)}td .vd.WATCH{color:var(--info)}
+.chip.V-TRIGGER{background:var(--good);color:#06130b}.chip.V-WATCH{background:var(--good-bg);color:var(--good);border:1px solid var(--good)}.card.V-TRIGGER,.card.V-WATCH{border-left-color:var(--good)}
 .verdict{display:flex;gap:8px;align-items:baseline;font-size:13px;padding:6px 10px;border-radius:6px;margin:-2px 0 2px}.verdict b{font:700 13px var(--mono);letter-spacing:.06em}.verdict.NOW{background:var(--good);color:#fff}.verdict.WAIT{background:var(--warn-bg);color:var(--fg)}.verdict.WAIT b{color:var(--warn)}.verdict.SKIP{background:var(--panel2);color:var(--muted)}.verdict.SKIP b{color:var(--bad)}
 td .vd{font:700 11px var(--mono)}td .vd.NOW{color:var(--good)}td .vd.WAIT{color:var(--warn)}td .vd.SKIP{color:var(--bad)}
 .pbtns{display:flex;flex-wrap:wrap;gap:6px}
@@ -217,14 +219,16 @@ const ALERT_RV = 1.5;   // only ding for signals with real volume behind them (7
 // IGNITION is judged on its own burst pace (3x+), not the day's rel vol (PAR Nov 16: 13x pace, 0.97x day).
 // Exit plan and risk cap (Nov 16 backtest): take +1.5%, keep the card's stop, out after 20 min.
 const TP_PCT = 1.5, HOLD_MIN = 20, RISK_CAP = 2.5;
-const tgt = e => e * (1 + TP_PCT / 100);
+// Target scales with how far the stock typically moves (5-min ATR), capped at +1.5% (Nov 17).
+const tpOf = r => (r && r.tp_pct) || TP_PCT;
+const tgt = (e, pct) => e * (1 + (pct || TP_PCT) / 100);
 const addMin = (hhmm, m) => { const [h, mm] = hhmm.split(":").map(Number), t = h * 60 + mm + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
 // Tags only, never a gate: IN PLAY = already traded a full normal day (1-5x) with a live 5m bar, after 9:00.
 // OPEN = an opening-range trigger 8:35-9:00 with a stop inside the cap.
-const inPlay = r => ctHM() >= 900 && (r.rel_vol_day || 0) >= 1 && r.rel_vol_day < 5 && (r.vol_surge || 0) >= 1 && r.setup !== "BREAK";
+const inPlay = r => ctHM() >= 900 && (((r.rel_vol_day || 0) >= 1 && r.rel_vol_day < 5) || (ctHM() < 1200 && (r.rel_vol || 0) >= 2)) && (r.vol_surge || 0) >= 1 && r.setup !== "BREAK";
 const openTag = r => /^ORB/.test(r.setup || "") && ctHM() < 900 && r.risk_pct != null && r.risk_pct <= RISK_CAP;
 const loudEnough = r => r.setup === "IGNITION" ? (r.vol_pace || 0) >= 3 : (r.rel_vol || 0) >= ALERT_RV;
-const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT"];
+const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT", "V-TRIGGER"];
 const LOSS_HALF = -200, LOSS_STOP = -400, WIN_DONE = 1200;   // Rule 9 + half-size step
 const store = {
   get(k, d){ try { const v = localStorage.getItem("gs_" + k); return v === null ? d : v; } catch(e){ return d; } },
@@ -304,7 +308,7 @@ async function loadScan(force){
 function checkTransitions(prev, next){
   const before = {}; (prev?.survivors || []).forEach(r => before[r.sym] = r.setup);
   (next.survivors || []).forEach(r => {
-    if (SIGNALS.includes(r.setup) && before[r.sym] !== r.setup && !r.late && loudEnough(r))
+    if (SIGNALS.includes(r.setup) && before[r.sym] !== r.setup && !r.late && loudEnough(r) && r.now_ok !== false)
       alertOnce(r.sym + "|trig|" + r.setup + "|" + next.loop, `${r.sym} ${r.setup}`, `Entry ${fmt(r.entry)} · stop ${fmt(r.stop)} · T1 ${fmt(r.t1)} · ${r.setup_note || ""}`);
   });
 }
@@ -375,12 +379,16 @@ function verdict(r, price){
     const R = r.entry - r.stop, past = (price - r.entry) / R;
     if (price >= r.entry && past > 0.3) return ["SKIP", `Ran ${fmt(past,1)}R past ${fmt(r.entry)}: missed, don't chase`];
     if (price < r.stop) return ["SKIP", `Under the ${fmt(r.stop)} stop level: setup broken`];
-    if (r.risk_pct != null && r.risk_pct > RISK_CAP) return ["SKIP", `Stop ${fmt(r.risk_pct,1)}% away (cap ${RISK_CAP}%): losses run bigger than the +${TP_PCT}% target`];
+    const isV = /^V-/.test(r.setup || "");
+    if (!isV && r.risk_pct != null && r.risk_pct > RISK_CAP) return ["SKIP", `Stop ${fmt(r.risk_pct,1)}% away (cap ${RISK_CAP}%): losses run bigger than the target`];
     const A = (scan.armed || []).find(a => a.sym === r.sym);
     if (SIGNALS.includes(r.setup) || (A && price >= r.entry)) {
       if (!loudEnough(r)) return ["WAIT", r.setup === "IGNITION" ? `Burst faded (pace ${fmt(r.vol_pace,1)}x < 3x)` : `Trigger on thin volume (rel vol ${fmt(r.rel_vol,1)}x < ${ALERT_RV}x)`];
       if (price < r.entry) return ["WAIT", `Buy stop ${fmt(r.entry)} · stop ${fmt(r.stop)}`];
-      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · target ${fmt(tgt(r.entry))} (+${TP_PCT}%) · out by ${addMin(String(Math.floor(ctHM()/100)).padStart(2,"0")+":"+String(ctHM()%100).padStart(2,"0"), HOLD_MIN)}${half}${r.catalyst_strength === "flow" ? " · NO NEWS, verify" : ""}`];
+      // NOW is earned: real catalyst, a volume burst, a target worth half the stop (scanner sets now_ok).
+      if (r.now_ok === false) return ["WATCH", `Trigger, but ${(r.now_why || []).join("; ")}. Look before you buy.`];
+      if (isV) return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} (${fmt(r.risk_pct,1)}%: size to it) · T1 VWAP ${fmt(r.t1)} · out by ${addMin(String(Math.floor(ctHM()/100)).padStart(2,"0")+":"+String(ctHM()%100).padStart(2,"0"), HOLD_MIN)}`];
+      return ["NOW", `Buy ≤ ${fmt(r.entry + 0.25 * R)} · stop ${fmt(r.stop)} · target ${fmt(tgt(r.entry, tpOf(r)))} (+${fmt(tpOf(r),1)}%) · out by ${addMin(String(Math.floor(ctHM()/100)).padStart(2,"0")+":"+String(ctHM()%100).padStart(2,"0"), HOLD_MIN)}${half}${r.catalyst_strength === "flow" ? " · NO NEWS, verify" : ""}`];
     }
     if (r.setup === "A-WATCH" && r.room_r != null && r.room_r < 2) return ["SKIP", `Only ${fmt(r.room_r,1)}R to the ${fmt(r.sess_high)} high: pays less than it risks`];
     if (A) return ["WAIT", `Armed: buy stop ${fmt(A.entry)} limit ${fmt(A.buy_limit)} · stop ${fmt(A.stop)}`];
@@ -419,9 +427,9 @@ function card(r){
   const lv = r.entry ? `<div class="levels">
       <div class="lv entry"><i>Entry ≥</i><b>${fmt(r.entry)}</b></div>
       <div class="lv stop"><i>Stop</i><b>${fmt(r.stop)}</b></div>
-      <div class="lv"><i>Target +${TP_PCT}%</i><b>${fmt(tgt(r.entry))}</b></div>
+      <div class="lv"><i>Target +${fmt(tpOf(r),1)}%</i><b>${fmt(tgt(r.entry, tpOf(r)))}</b></div>
       <div class="lv${r.risk_pct > RISK_CAP ? " stop" : ""}"><i>Risk${r.risk_pct > RISK_CAP ? " &gt; cap" : ""}</i><b>${fmt(r.risk_pct,1)}%</b></div></div>
-      <div class="size">Exit plan: target ${fmt(tgt(r.entry))} or stop ${fmt(r.stop)}, whichever first; otherwise out ${HOLD_MIN} min after the fill.</div>` :
+      <div class="size">Exit plan: target ${fmt(tgt(r.entry, tpOf(r)))} (+${fmt(tpOf(r),1)}%, sized to how far it usually moves) or stop ${fmt(r.stop)}, whichever first; otherwise out ${HOLD_MIN} min after the fill.</div>` :
     r.pullback_zone ? `<div class="levels"><div class="lv entry" style="grid-column:span 2"><i>Pullback zone</i><b>${fmt(r.pullback_zone[0])}–${fmt(r.pullback_zone[1])}</b></div><div class="lv"><i>${r.vwap_basis==="time"?"TWAP*":"VWAP"}</i><b>${fmt(r.vwap)}</b></div><div class="lv"><i>Ext</i><b>${fmt(r.ext_pct,1)}%</b></div></div>` : "";
   const cat = r.catalyst ? `<div class="cat"><a href="${esc(r.catalyst.url)}" target="_blank" rel="noopener">${esc(r.catalyst.headline)}</a> <small>${esc(r.catalyst.source || "")} · ${esc(r.catalyst.time)}</small></div>`
     : `<div class="cat"><small>${r.catalyst_strength === "squeeze" ? "No news. Low-float volume squeeze." : "No company news found."}</small></div>`;
@@ -530,7 +538,7 @@ function openIn(sym){
     if (!(v.entry > 0 && v.shares > 0 && v.stop > 0 && v.stop < v.entry)) return;
     positions[sym] = { sym, name: r.name || sym, entry: v.entry, shares: Math.round(v.shares), stop: v.stop, stop0: v.stop,
       t1: v.t1 > v.entry ? v.t1 : r2(v.entry + 2 * (v.entry - v.stop)), t2: v.t2 > v.entry ? v.t2 : r2(v.entry + 3 * (v.entry - v.stop)),
-      opened: Date.now(), half: false, sold: 0, realized: 0, exits: [], last: r.price || v.entry };
+      opened: Date.now(), tp_pct: r.tp_pct || TP_PCT, half: false, sold: 0, realized: 0, exits: [], last: r.price || v.entry };
     savePos();
   });
 }
@@ -585,8 +593,8 @@ function posCard(p){
   const trail = row?.ema9 ? r2(Math.max(p.entry, row.ema9 * 0.995)) : p.entry;
   const ct = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })), mins = ct.getHours() * 60 + ct.getMinutes();
   let orders, next, cls = "";
-  const tp = r2(tgt(p.entry)), outAt = p.opened + HOLD_MIN * 60000, left = Math.round((outAt - Date.now()) / 60000);
-  const scalp = `Plan: target <b>${fmt(tp)}</b> (+${TP_PCT}%) · stop <b>${fmt(p.stop)}</b> · out by <b>${new Date(outAt).toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"2-digit",minute:"2-digit"})}</b> (${left > 0 ? left + " min left" : "time's up"})`;
+  const tp = r2(tgt(p.entry, p.tp_pct)), outAt = p.opened + HOLD_MIN * 60000, left = Math.round((outAt - Date.now()) / 60000);
+  const scalp = `Plan: target <b>${fmt(tp)}</b> (+${fmt(p.tp_pct || TP_PCT,1)}%) · stop <b>${fmt(p.stop)}</b> · out by <b>${new Date(outAt).toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"2-digit",minute:"2-digit"})}</b> (${left > 0 ? left + " min left" : "time's up"})`;
   if (!p.half && price >= tp) { alertOnce(p.sym + "|tp", `${p.sym} hit target ${fmt(tp)}`, "Sell all: plan target reached."); }
   if (!p.half && left <= 0) { alertOnce(p.sym + "|sellby", `${p.sym} sell-by reached`, "20 minutes up. Sell all at the bid."); }
   if (!p.half) {
@@ -676,11 +684,11 @@ function playCall(x, p){
   if (x.status === "unresolved") return ["SKIP", "Unresolved"];
   if (x.status === "open") {
     const outBy = x.fill_time_ct ? addMin(x.fill_time_ct, HOLD_MIN) : null, nowHM = ctHM();
-    if (p != null && p >= tgt(x.entry)) return ["SKIP", `Target ${fmt(tgt(x.entry))} reached: take it if you're in`];
+    if (p != null && p >= tgt(x.entry, x.tp_pct)) return ["SKIP", `Target ${fmt(tgt(x.entry, x.tp_pct))} reached: take it if you're in`];
     if (outBy && nowHM >= +outBy.replace(":", "")) return ["SKIP", `Past the ${outBy} sell-by: out if you're in`];
     if (x.t1_time_ct) return ["WAIT", `T1 hit ${x.t1_time_ct}: half off, stop to ${fmt(x.entry)} · T2 ${fmt(x.t2)}`];
     if (r != null && r > 0.3) return ["SKIP", `Running ${fmt(r, 1)}R past entry: missed, don't chase`];
-    if (r != null && p >= x.entry) return ["NOW", `Still in the window: buy ≤ ${fmt(x.entry + 0.25 * R)} · stop ${fmt(x.stop)}`];
+    if (r != null && p >= x.entry) return x.now_ok === false ? ["WATCH", "In the window, but it wasn't a NOW-quality trigger"] : ["NOW", `Still in the window: buy ≤ ${fmt(x.entry + 0.25 * R)} · stop ${fmt(x.stop)}`];
     return ["WAIT", `Back under entry: buy stop ${fmt(x.entry)} · stop ${fmt(x.stop)}`];
   }
   // pending: signalled, hasn't traded through entry yet
@@ -704,7 +712,7 @@ function renderFresh(){
     const best = x.mfe_r != null ? fmt(x.mfe_r, 1) + "R" : "—";
     return `<tr style="${late ? "opacity:.55" : ""}"><td><span class="vd ${V}">${V}</span> <small>${esc(why)}</small></td><td>${esc(x.time_ct)}</td><td><b>${esc(x.sym)}</b>${x.catalyst_strength === "flow" ? ' <span class="chip warnf">NO NEWS</span>' : ""}</td>
       <td><span class="chip ${esc(x.setup)}">${esc(x.setup)}</span>${late ? ' <span class="chip LATE">LATE</span>' : ""}</td>
-      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(tgt(x.entry))} · ${x.fill_time_ct ? addMin(x.fill_time_ct, HOLD_MIN) : "+" + HOLD_MIN + "m"}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
+      <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(tgt(x.entry, x.tp_pct))} · ${x.fill_time_ct ? addMin(x.fill_time_ct, HOLD_MIN) : "+" + HOLD_MIN + "m"}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
       <td class="${rn == null ? "" : rn >= 0 ? "up" : "dn"}">${rn == null ? "—" : (rn >= 0 ? "+" : "") + fmt(rn, 1) + "R"} · ${best}</td></tr>`;
   }).join("");
 }
