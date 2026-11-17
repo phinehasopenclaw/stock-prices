@@ -1733,6 +1733,15 @@ def main():
             if time.time() < end_today.timestamp() - 300:
                 relay()
             break
+        # A run started before 06:00 CT would hit the 6-hour limit mid-morning (03:56 start ->
+        # 09:46 hand-off, in the prime window). Hand off at 08:20 instead, before the open,
+        # so the successor covers 08:20-14:10 and the next hand-off lands in the quiet afternoon.
+        now_ct = dt.datetime.now(CT)
+        if (dt.datetime.fromtimestamp(start, CT).time() < dt.time(6, 0)
+                and dt.time(8, 20) <= now_ct.time() < dt.time(8, 27) and REPO and TOKEN):
+            log("early relay before the open")
+            relay()
+            break
         if session == "CLOSED" and dt.datetime.now(ET).hour >= 16:
             log("Market closed for the day; exiting.")
             break
