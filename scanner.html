@@ -237,8 +237,13 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 
 // ---- settings
 // One-time setup link: scanner.html#key=XXXX saves the Finnhub key in this browser, then wipes it from the address bar.
-(() => { const m = location.hash.match(/key=([A-Za-z0-9]+)/);
-  if (m) { store.set("key", m[1]); history.replaceState(null, "", location.pathname + location.search); } })();
+(() => { const m = location.hash.match(/key=([A-Za-z0-9]+)/), g = location.hash.match(/gh=([A-Za-z0-9_]+)/);
+  if (m) store.set("key", m[1]);
+  // #gh=TOKEN: a read-only GitHub token lifts the 60-requests/hour anonymous limit to 5,000.
+  // Without it, two open tabs or devices on one connection exhaust the limit and the page
+  // falls back to a CDN copy that can be up to ~5 minutes old (Nov 17, 08:25).
+  if (g) store.set("gh", g[1]);
+  if (m || g) history.replaceState(null, "", location.pathname + location.search); })();
 $("riskIn").value = store.get("risk", "200");
 $("keyIn").value = store.get("key", "");
 $("maxIn").value = store.get("max", "8");
@@ -278,10 +283,13 @@ async function loadScan(force){
   try {
     // Conditional request: a 304 (nothing new) doesn't count against GitHub's 60/hour limit.
     const h = { Accept: "application/vnd.github.raw+json" };
+    const ghTok = store.get("gh", "");
+    if (ghTok) h.Authorization = "Bearer " + ghTok;
     if (scanEtag && scan) h["If-None-Match"] = scanEtag;
     const r = await fetch(API, { headers: h, cache: "no-store" });
     if (r.status === 304) notModified = true;
     else if (r.ok) { data = await r.json(); scanEtag = r.headers.get("ETag"); scanSource = ""; }
+    else if (r.status === 401 && ghTok) { store.set("gh", ""); err = "GitHub token rejected, cleared"; }
     else err = r.status === 403 || r.status === 429 ? "GitHub rate limit" : "GitHub API " + r.status;
   } catch(e){ err = e.message; }
   if (notModified) { $("err").hidden = true; render(); return; }
