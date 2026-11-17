@@ -390,6 +390,65 @@ def pm_read(row, pre, price, ema9):
                              "Wait for the first 5-min candle.")
 
 
+V_FLUSH_MIN = 10.0          # % drop from the regular-session open that counts as a flush
+V_WINDOW_BARS = 12          # flush low must print in the first 60 minutes
+V_RECLAIM_FRAC = 1 / 3      # reclaim = a close back above the bottom third of the flush
+V_SURGE_MIN = 3.0           # reclaim bar volume vs a normal 5-min bar
+V_END_CT = dt.time(10, 30)
+
+
+def v_recovery(row, reg, o, h, l, c, vol, last, price, vwap, lv):
+    """Flush >= 10% below the open inside the first hour, no new low since, then a green 5-min
+    bar closing above the bottom third of the flush on volume. Entry above that bar's high,
+    stop under the flush low, T1 = VWAP (well overhead after a flush), T2 = the open.
+    Your rule: V-recovery after a flush, enter on confirmation. Returns True if it set the row."""
+    ro = float(reg["Open"].iloc[0])
+    win = min(V_WINDOW_BARS, last + 1)
+    if ro <= 0 or win < 2:
+        return False
+    li = min(range(win), key=lambda i: l[i])
+    fl = l[li]
+    flush = (ro - fl) / ro * 100
+    if flush < V_FLUSH_MIN or last <= li or min(l[li + 1:last + 1]) <= fl or price <= fl:
+        return False
+    reclaim = fl + (ro - fl) * V_RECLAIM_FRAC
+    # Reclaim volume vs a NORMAL 5-min bar for this stock (avg daily volume / 78). Comparing
+    # against the flush bars fails: SLS's opening bar alone traded 36M shares.
+    normal = (row.get("avg_vol") or 0) / 78
+    since = vol[li + 1:last]
+    base = normal or ((sum(since) / len(since)) if since else 0)
+    vs = vol[last] / base if base else None
+    row["v_flush_pct"], row["v_low"], row["v_reclaim"] = fnum(flush, 1), fnum(fl), fnum(reclaim)
+    stop = fl * 0.995
+    t1, t2 = max(vwap, h[last]), ro
+    row["v_t1"] = fnum(vwap)
+    if any(c[i] >= reclaim for i in range(li + 1, last)):
+        return False   # the reclaim already happened earlier: one V per flush, no re-triggers
+    if c[last] > o[last] and c[last] >= reclaim and (vs or 0) >= V_SURGE_MIN:
+        entry = h[last] + 0.01
+        risk = entry - stop
+        if price >= entry and price <= entry + 0.5 * risk:
+            row["setup"] = "V-TRIGGER"
+            row["setup_note"] = (f"Flushed {flush:.0f}% off the open {ro:.2f} to {fl:.2f}, reclaimed on {vs:.1f}x volume. "
+                                 f"Stop under the flush low; T1 VWAP {vwap:.2f}, T2 the open {ro:.2f}. Size to the stop.")
+            lv(entry, stop, t1, t2)
+            return True
+        if price < entry:
+            row["setup"] = "V-WATCH"
+            row["setup_note"] = (f"Flushed {flush:.0f}% to {fl:.2f} and reclaimed on {vs:.1f}x volume. "
+                                 f"Buy the break of {entry:.2f}; stop under {fl:.2f}.")
+            lv(entry, stop, t1, t2)
+            return True
+        return False   # ran past the window; normal setups take over
+    if price < reclaim:
+        row["setup"] = "V-WATCH"
+        row["setup_note"] = (f"Flushed {flush:.0f}% off the open to {fl:.2f}, no new low for {last - li} bar(s). "
+                             f"Trigger: a green 5-min close above {reclaim:.2f} on volume.")
+        lv(max(reclaim, h[last]) + 0.01, stop, t1, t2)
+        return True
+    return False
+
+
 def analyze_bars(df, row, session):
     """df: one ticker's 5m bars for today (ET index). Mutates row with setup info."""
     df = df.dropna(subset=["Close"])
@@ -493,6 +552,13 @@ def analyze_bars(df, row, session):
     greens = [vol[i] for i in range(0, last) if c[i] > o[i]]
     drying = bool(reds and greens and (sum(reds) / len(reds)) < 0.6 * (max(greens)))
 
+    # Typical 5-min range (%) over the last 12 completed bars. Half a 20-minute range is about
+    # one 5-min ATR, so that's the scalp target, capped at TP_PCT and floored at TP_MIN.
+    # Nov 17: a fixed +1.5% never hit on DECK/HTHT/BCE/ARCC/WLK/ACM (best moves 0.4-1.0%).
+    rng = [(h[i] - l[i]) / c[i] * 100 for i in range(max(0, last - 11), last + 1) if c[i]]
+    atr5 = sum(rng) / len(rng) if rng else None
+    row["atr5_pct"] = fnum(atr5, 2)
+    row["tp_pct"] = fnum(min(TP_PCT, max(TP_MIN, atr5)) if atr5 else TP_PCT, 2)
     row["vol_surge"] = fnum(surge, 2)
     row["vol_pace"] = fnum(pace, 2)
     row["ext_pct"] = fnum(ext, 2)
@@ -545,6 +611,10 @@ def analyze_bars(df, row, session):
                 lv(entry, stop)
                 return
             # Already more than 1R past the break: fall through (usually EXTENDED).
+
+    # ---- V-recovery: flush off the open, then a volume reclaim (SLS Nov 17) ------------
+    if reg_mode and now_ct.time() < V_END_CT and v_recovery(row, reg, o, h, l, c, vol, last, price, vwap, lv):
+        return
 
     if price < vwap:
         row["setup"] = "FADING"
@@ -725,7 +795,7 @@ def check_news(row):
 
 
 # ---- Filter & rank --------------------------------------------------------
-SETUP_RANK = {"IGNITION": 0, "ORB-TRIGGER": 0, "A-TRIGGER": 0, "ORB-WATCH": 1, "A-WATCH": 1, "B-BREAKOUT": 2, "B-WATCH": 3,
+SETUP_RANK = {"IGNITION": 0, "ORB-TRIGGER": 0, "A-TRIGGER": 0, "V-TRIGGER": 0, "ORB-WATCH": 1, "A-WATCH": 1, "V-WATCH": 1, "B-BREAKOUT": 2, "B-WATCH": 3,
               "PM-STRONG": 3, "HOLDING": 4, "PM-WATCH": 4, "PM-FADE": 7, "EXTENDED": 5, "THIN": 6, "FADING": 7, "NO DATA": 8}
 
 
@@ -788,6 +858,31 @@ def apply_filter(r, session=None):
                        if dollar_vol < dv_min else "Thin / small")
     r["reject"] = reasons
     r["pass"] = not reasons
+    now_quality(r)
+
+
+NOW_CATALYSTS = ("strong", "analyst", "squeeze")
+
+
+def now_quality(r):
+    """Gate for the page's NOW call (Nov 17 post-mortem: 11 NOW-driven trades, 0 reached +1.5%,
+    5 of them no-news names). A trigger earns NOW only with a real catalyst, a volume burst on
+    the trigger, and a target worth at least half the stop distance. Anything else is WATCH."""
+    why = []
+    if r.get("catalyst_strength") not in NOW_CATALYSTS:
+        why.append("no news")
+    pace, surge, rv = r.get("vol_pace") or 0, r.get("vol_surge") or 0, r.get("rel_vol") or 0
+    if not (pace >= 3 or surge >= 2 or (r.get("setup") in ("ORB-TRIGGER", "V-TRIGGER") and rv >= 3)):
+        why.append(f"volume {max(pace, surge):.1f}x (needs 3x pace or 2x bar)")
+    tp, risk = r.get("tp_pct"), r.get("risk_pct")
+    if r.get("setup") == "V-TRIGGER":
+        e, st, t1 = r.get("entry"), r.get("stop"), r.get("v_t1")
+        if e and st and t1 and (t1 - e) < (e - st):
+            why.append(f"VWAP {t1:.2f} pays {(t1 - e) / (e - st):.1f}R (needs 1R)")
+    elif tp and risk and tp < 0.5 * risk:
+        why.append(f"target +{tp:.1f}% vs {risk:.1f}% stop")
+    r["now_ok"] = not why
+    r["now_why"] = why
 
 
 def quality(r):
@@ -838,7 +933,7 @@ def fill_profile(row):
 #   full  = all shares out at T1 or the stop
 #   split = half out at T1, stop on the rest moves to breakeven, rest out at T2,
 #           breakeven, or the 14:45 CT time stop
-SIGNAL_SETUPS = ("IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT")   # BREAK signals come from watch_armed()
+SIGNAL_SETUPS = ("IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT", "V-TRIGGER")   # BREAK signals come from watch_armed()
 RESIGNAL_MIN = 20             # same name + setup can signal again after this many minutes
 FILL_WINDOW_MIN = 30           # a signal that never trades through its entry expires
 TIME_STOP_ET = dt.time(15, 45)  # 14:45 CT
@@ -868,6 +963,16 @@ def load_signals():
 
 
 TP_PCT, HOLD_MIN, RISK_CAP = 1.5, 20, 2.5   # exit plan + stop cap from the Nov 16 backtest
+TP_MIN = 0.4                                # floor for the volatility-scaled target (Nov 17)
+
+
+def in_play(r, t):
+    """Traded 1-5x a normal FULL day already, or (before noon) 2x+ the normal pace for this
+    time of day; plus a live 5m bar, after 9:00, not an armed BREAK. Nov 17: the full-day test
+    alone tagged zero morning signals."""
+    rvd, rv = r.get("rel_vol_day"), r.get("rel_vol")
+    vol_ok = (rvd is not None and 1 <= rvd < 5) or (t < dt.time(12, 0) and rv is not None and rv >= 2)
+    return bool(t >= dt.time(9, 0) and vol_ok and (r.get("vol_surge") or 0) >= 1 and r.get("setup") != "BREAK")
 
 
 def signal_tags(r, now_ct):
@@ -877,8 +982,8 @@ def signal_tags(r, now_ct):
     t = now_ct.time()
     return {
         "risk_pct": fnum(risk_pct, 2), "rel_vol_day": rvd,
-        "in_play": bool(t >= dt.time(9, 0) and rvd is not None and 1 <= rvd < 5
-                        and (r.get("vol_surge") or 0) >= 1 and r.get("setup") != "BREAK"),
+        "in_play": in_play(r, t),
+        "tp_pct": r.get("tp_pct"), "now_ok": r.get("now_ok"),
         "open_tag": bool(str(r.get("setup", "")).startswith("ORB") and t < dt.time(9, 0)
                          and risk_pct is not None and risk_pct <= RISK_CAP),
     }
@@ -932,11 +1037,13 @@ def push_worthy(r):
     names are tagged to verify. Scoreboard Nov 13-16: no-news IGNITION 12/36 fills reached +1R.
     Every other setup still needs day rel vol >= PUSH_MIN_RV and a real catalyst (no-news
     B-BREAKOUT: 8/83 reached +1R)."""
+    if r.get("setup") == "V-TRIGGER":
+        return bool(r.get("now_ok"))   # flush stops run wide by design; size to the stop
     if (r.get("risk_pct") or 0) > RISK_CAP:
         return False   # wide stops carried the losses in the Nov 16 backtest
     if r.get("setup") == "IGNITION":
         return (r.get("vol_pace") or 0) >= IGNITION_PACE
-    return (r.get("rel_vol") or 0) >= PUSH_MIN_RV and r.get("catalyst_strength") != "flow"
+    return bool(r.get("now_ok")) and (r.get("rel_vol") or 0) >= PUSH_MIN_RV
 
 
 def push_signal(sig, r):
@@ -946,12 +1053,14 @@ def push_signal(sig, r):
     risk = sig["entry"] - sig["stop"]
     late = not sig.get("prime")
     nonews = r.get("catalyst_strength") == "flow"
-    title = (f"{'LATE ' if late else ''}{sig['sym']} {sig['setup']} {sig['time_ct']} CT"
+    title = (f"{'' if r.get('now_ok') else 'WATCH '}{'LATE ' if late else ''}{sig['sym']} {sig['setup']} {sig['time_ct']} CT"
              + (" - NO NEWS, verify" if nonews else ""))
     cat = f"{r.get('catalyst_type') or 'no type'} ({r.get('catalyst_strength')})"
-    body = (f"Entry >= {sig['entry']:.2f} | stop {sig['stop']:.2f} | T1 {sig['t1']:.2f} (2R) | "
+    tp = r.get("tp_pct") or TP_PCT
+    body = (f"Entry >= {sig['entry']:.2f} | stop {sig['stop']:.2f} | target {sig['entry'] * (1 + tp / 100):.2f} (+{tp:.1f}%), out in {HOLD_MIN} min | "
             f"risk {risk / sig['entry'] * 100:.1f}%\n{r.get('setup_note') or ''}\nCatalyst: {cat}"
             + ("\nBAD-NEWS HEADLINE" if r.get("bad_headline") else "")
+            + (f"\nWATCH, not NOW: {'; '.join(r.get('now_why') or [])}" if not r.get("now_ok") else "")
             + ("".join(f"\nWarning: {w}" for w in (r.get("warnings") or []))))
     try:
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=body.encode("utf-8"), timeout=10, headers={
@@ -1030,7 +1139,7 @@ def shadow_scalp(sig, bars):
                 sig["scalp_pct"] = round((stop - px) / px * 100, 2)
                 return
             continue
-        tp = px * (1 + TP_PCT / 100)
+        tp = px * (1 + (sig.get("tp_pct") or TP_PCT) / 100)
         if lo <= stop:
             sig["scalp_pct"] = round((min(stop, op) - px) / px * 100, 2)
             return
