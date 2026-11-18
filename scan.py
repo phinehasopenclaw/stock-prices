@@ -879,8 +879,11 @@ def now_quality(r):
         e, st, t1 = r.get("entry"), r.get("stop"), r.get("v_t1")
         if e and st and t1 and (t1 - e) < (e - st):
             why.append(f"VWAP {t1:.2f} pays {(t1 - e) / (e - st):.1f}R (needs 1R)")
-    elif tp and risk and tp < 0.5 * risk:
-        why.append(f"target +{tp:.1f}% vs {risk:.1f}% stop")
+    else:
+        if risk and risk > RISK_CAP:
+            why.append(f"stop {risk:.1f}% away (cap {RISK_CAP:g}%)")   # matches the page's SKIP (AS, IBRX Nov 18)
+        if tp and risk and tp < 0.5 * risk:
+            why.append(f"target +{tp:.1f}% vs {risk:.1f}% stop")
     r["now_ok"] = not why
     r["now_why"] = why
 
