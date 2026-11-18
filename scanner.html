@@ -701,7 +701,7 @@ function playCall(x, p){
 }
 function renderFresh(){
   const now = Date.now() / 1000, first = {};
-  for (const x of (scan.signals_today || []).slice().sort((a, b) => a.ts - b.ts)) if (!first[x.sym]) first[x.sym] = x;
+  for (const x of (scan.signals_today || []).slice().sort((a, b) => a.ts - b.ts)) if (!first[x.sym] && !x.past_window) first[x.sym] = x;
   const live = s => s === "pending" || s === "open";
   const rows = Object.values(first).filter(x => live(x.status) || now - x.ts <= 15 * 60 ||
       (x.exit_time_ct && now - x.ts <= 120 * 60 && ctHM() - +x.exit_time_ct.replace(":", "") <= 20))

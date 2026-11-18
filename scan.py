@@ -49,6 +49,7 @@ MAX_BAR_NAMES = 40          # names that get 5m bars each loop
 MAX_NEWS_NAMES = 40         # names that get a Finnhub news check (cached 20 min)
 NEWS_TTL = 20 * 60          # seconds to cache a news lookup
 LOOP_SECONDS = int(os.environ.get("LOOP_SECONDS", 60))
+PRIME_LOOP_SECONDS = int(os.environ.get("PRIME_LOOP_SECONDS", 30))
 FLOW_MIN = 5.0      # intraday: minute-to-minute volume vs normal per-minute volume that pulls a name in
 FLOW_SLOTS = 10     # bar-analysis slots kept for intraday flow movers
 STICKY_SLOTS = 12   # extra slots for names that signalled today, so their cards stay up
@@ -1031,7 +1032,11 @@ def log_new_signals(survivors):
             orb_today.add((r["sym"], "ORB-TRIGGER"))
         sig["flow_mover"] = bool(r.get("flow_mover"))
         sig["flow_x"] = r.get("flow_x")
-        if not sig["repeat"] and push_worthy(r):
+        # Already past the buy window (0.3R over entry) when it fired: logged for scoring, never
+        # pushed, hidden from In play. OMC Nov 18 fired with price already through the window.
+        R = (sig.get("entry") or 0) - (sig.get("stop") or 0)
+        sig["past_window"] = bool(R > 0 and (r.get("price") or 0) > sig["entry"] + 0.3 * R)
+        if not sig["repeat"] and not sig["past_window"] and push_worthy(r):
             push_signal(sig, r)   # everything else is still logged and scored, just not pushed
 
 
@@ -1857,7 +1862,11 @@ def main():
         if session == "CLOSED" and dt.datetime.now(ET).hour >= 16:
             log("Market closed for the day; exiting.")
             break
-        _wake.wait(max(10, LOOP_SECONDS - (time.time() - t)))
+        # Prime window 08:30-10:30 CT: scan every 30s so NOW calls arrive while they're still
+        # catchable (Nov 18: half of the NOW windows lasted under a minute). 60s otherwise.
+        ct_now = dt.datetime.now(CT).time()
+        loop_s = PRIME_LOOP_SECONDS if dt.time(8, 30) <= ct_now < dt.time(10, 30) else LOOP_SECONDS
+        _wake.wait(max(10, loop_s - (time.time() - t)))
         _wake.clear()
 
 
