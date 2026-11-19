@@ -1,0 +1,20 @@
+name: public-probe
+# One-off, manual: tests the Public API (token, quotes, bars) for the scanner.
+# Read-only endpoints; prints timings and data shape, never the key or account IDs.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe
+        env:
+          PUBLIC_API_KEY: ${{ secrets.PUBLIC_API_KEY }}
+        run: python tools/public_probe.py
