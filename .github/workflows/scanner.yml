@@ -59,8 +59,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -q "yfinance>=0.2.54" requests
+      - name: Guard - the Public key may trade, the scanner must not
+        run: |
+          # The Public API key inherits account permissions. The scanner may only call the
+          # token, account-list and quotes endpoints. Fail the run on any order endpoint.
+          if grep -nE '/order|preflight|/trading/[{]|/cancel|place_?order' scan.py publicdata.py; then
+            echo "::error::order/trading endpoint referenced in scanner code - refusing to run with PUBLIC_API_KEY"; exit 1; fi
       - name: Run scanner loop
         env:
+          PUBLIC_API_KEY: ${{ secrets.PUBLIC_API_KEY }}
           FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

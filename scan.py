@@ -12,6 +12,7 @@ Runs as a long-lived GitHub Actions job. Each loop:
 """
 import datetime as dt
 import json
+import publicdata as pubq   # real-time quotes (read-only); Yahoo stays the fallback
 import math
 import os
 import re
@@ -62,6 +63,7 @@ ARM_MIN_RV = 1.5
 ARM_MAX = 8
 B_ARM_MIN_SURGE = 0.5  # B-WATCH arms only if the last completed 5m bar traded >= half its baseline volume
 WATCH_SECONDS = 15
+WATCH_SECONDS_FAST = 5
 CHASE_R = 0.3          # a break already more than this far past entry is logged, not pushed
 BUY_LIMIT_R = 0.25     # buy stop-limit: limit this far above the stop price, so a runaway never fills
 ARCHIVE_KEEP_DAYS = 7
@@ -688,6 +690,25 @@ def analyze_bars(df, row, session):
         row["setup_note"] = "Above VWAP, between support and the high. No trigger."
 
 
+def overlay_live(df, p):
+    """Fold the live price into Yahoo's current 5-min bar when that bar is the one forming now,
+    so close/high/low reflect this second, not a minute ago. Never invents a bar."""
+    if df is None or df.empty:
+        return df
+    bucket = pd_floor_5m(dt.datetime.now(ET))
+    if df.index[-1] == bucket:
+        df = df.copy()
+        i = df.index[-1]
+        df.loc[i, "Close"] = p
+        df.loc[i, "High"] = max(float(df.loc[i, "High"]), p)
+        df.loc[i, "Low"] = min(float(df.loc[i, "Low"]), p)
+    return df
+
+
+def pd_floor_5m(t):
+    return t.replace(minute=t.minute - t.minute % 5, second=0, microsecond=0)
+
+
 def fetch_bars(rows, session):
     syms = [r["sym"] for r in rows]
     if not syms:
@@ -698,12 +719,19 @@ def fetch_bars(rows, session):
     except Exception as e:
         _state["errors"].append(f"bars download failed: {e!r}"[:300])
         return
+    live = pubq.quotes(syms)   # Public: 1-4 s old vs Yahoo's ~1 min (Nov 19 probe); {} on failure
+    _state["price_feed"] = {"public": len(live), "of": len(syms), **pubq.status()}
     for r in rows:
         try:
             df = data[r["sym"]] if len(syms) > 1 else data
             if df.index.tz is None:
                 df.index = df.index.tz_localize("UTC")
             df = df.tz_convert(ET)
+            q = live.get(r["sym"])
+            if q and q.get("p"):
+                # Triggers compare the live price to the levels; the bars still come from Yahoo.
+                r["price"], r["price_src"] = q["p"], "public"
+                df = overlay_live(df, q["p"])
             analyze_bars(df, r, session)
         except Exception as e:
             r["setup"] = "NO DATA"
@@ -1582,13 +1610,20 @@ def watch_armed():
     moment price trades through the armed entry on volume."""
     fired = set()
     while True:
-        time.sleep(WATCH_SECONDS)
+        # With Public's real-time quotes, check armed levels every 5 s; Yahoo-only stays at 15 s.
+        time.sleep(WATCH_SECONDS_FAST if pubq.enabled() else WATCH_SECONDS)
         try:
             with _lock:
                 armed = {k: dict(v) for k, v in _armed.items()}
             if not armed:
                 continue
             syms = sorted(armed)
+            live = pubq.quotes(syms)
+            if live:
+                # Only names trading at/through their entry right now go on to the volume check.
+                syms = [s_ for s_ in syms if s_ in live and live[s_]["p"] >= armed[s_]["entry"]]
+                if not syms:
+                    continue
             data = yf.download(syms, period="1d", interval="1m", prepost=False, group_by="ticker",
                                progress=False, threads=True, auto_adjust=False)
             now_ct = dt.datetime.now(CT)
@@ -1606,6 +1641,9 @@ def watch_armed():
                     continue
                 last = df.iloc[-1]
                 price, hi = float(last["Close"]), float(last["High"])
+                if s_ in live:
+                    price = live[s_]["p"]
+                    hi = max(hi, price)
                 if hi < a["entry"]:
                     continue
                 # Yahoo reports 0 volume for the minute still forming, so judge the break on the
@@ -1790,6 +1828,7 @@ def one_loop():
         "session": session,
         "loop": _state["loop"],
         "loop_seconds": LOOP_SECONDS,
+        "price_feed": _state.get("price_feed"),
         "scan_seconds": round(time.time() - t0, 1),
         "params": {"gap_min": GAP_MIN, "price": [PRICE_MIN, PRICE_MAX], "mcap_min": MCAP_MIN},
         "universe_size": _state.get("universe_size"),
