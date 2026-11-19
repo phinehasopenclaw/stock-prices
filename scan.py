@@ -1064,7 +1064,11 @@ def log_new_signals(survivors):
         # pushed, hidden from In play. OMC Nov 18 fired with price already through the window.
         R = (sig.get("entry") or 0) - (sig.get("stop") or 0)
         sig["past_window"] = bool(R > 0 and (r.get("price") or 0) > sig["entry"] + 0.3 * R)
-        if not sig["repeat"] and not sig["past_window"] and push_worthy(r):
+        # Push a name's first signal, or its first NOW-quality one if earlier signals were only
+        # WATCH (VVV Nov 19: WATCH at 08:44, NOW at 09:31 counted as a repeat and never pushed).
+        first_now = r.get("now_ok") and not any(
+            x.get("now_ok") for x in sigs if x["date"] == sig["date"] and x["sym"] == r["sym"] and x is not sig)
+        if (not sig["repeat"] or first_now) and not sig["past_window"] and push_worthy(r):
             push_signal(sig, r)   # everything else is still logged and scored, just not pushed
 
 
@@ -1609,6 +1613,7 @@ def watch_armed():
     """Background thread: every WATCH_SECONDS, read 1-minute bars for armed names and fire the
     moment price trades through the armed entry on volume."""
     fired = set()
+    last_break = {}
     while True:
         # With Public's real-time quotes, check armed levels every 5 s; Yahoo-only stays at 15 s.
         time.sleep(WATCH_SECONDS_FAST if pubq.enabled() else WATCH_SECONDS)
@@ -1630,8 +1635,8 @@ def watch_armed():
             for s_ in syms:
                 a = armed[s_]
                 key = (now_ct.date().isoformat(), s_, a["entry"])
-                if key in fired:
-                    continue
+                if key in fired or time.time() - last_break.get(s_, 0) < 900:
+                    continue   # one armed break per name per 15 min (TU fired twice in 16 s, Nov 19)
                 try:
                     multi = getattr(data.columns, "nlevels", 1) > 1
                     df = (data[s_] if multi else data).dropna(subset=["Close"])
@@ -1667,6 +1672,7 @@ def watch_armed():
                 else:
                     ev["result"] = "BREAK"
                 archive_append("breaks.jsonl", ev)
+                last_break[s_] = time.time()
                 log(f"armed {s_} {ev['result']} @ {price} (entry {a['entry']}, {past_r:+.2f}R, bar vol {vol_x})")
                 if ev["result"] != "BREAK":
                     continue
