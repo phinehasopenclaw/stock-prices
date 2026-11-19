@@ -238,6 +238,7 @@ const store = {
   set(k, v){ try { localStorage.setItem("gs_" + k, v); } catch(e){} }
 };
 let scan = null, live = {}, alerted = new Set(), soundOn = store.get("sound","0") === "1";
+let actx = null;   // declared before setSoundBtn() runs
 const fmt = (x, d = 2) => x == null || isNaN(x) ? "—" : Number(x).toFixed(d);
 const fmtBig = x => x == null ? "—" : x >= 1e9 ? (x/1e9).toFixed(2)+"B" : x >= 1e6 ? (x/1e6).toFixed(1)+"M" : x >= 1e3 ? (x/1e3).toFixed(0)+"K" : String(x);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -259,13 +260,22 @@ $("livePill").onclick = () => { if (!store.get("key", "")) { $("settings").hidde
 ["riskIn","keyIn","maxIn"].forEach(id => $(id).addEventListener("change", () => {
   store.set({riskIn:"risk",keyIn:"key",maxIn:"max"}[id], $(id).value.trim()); render(); pollLive();
 }));
-function setSoundBtn(){ $("soundBtn").textContent = "Alerts: " + (soundOn ? "on" : "off"); }
+function setSoundBtn(){
+  const armed = actx && actx.state === "running";
+  $("soundBtn").textContent = "Alerts: " + (soundOn ? (armed ? "on" : "on · click page to arm sound") : "off");
+  $("soundBtn").style.outline = soundOn && !armed ? "2px solid var(--warn)" : "";
+}
+// Browsers keep audio silent until the page gets a click or key press. Arm it on the first one.
+function armAudio(){
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === "suspended") actx.resume().then(setSoundBtn); else setSoundBtn(); } catch(e){}
+}
+["pointerdown", "keydown", "touchstart"].forEach(ev => document.addEventListener(ev, armAudio, { passive: true }));
 setSoundBtn();
 $("soundBtn").onclick = async () => {
   soundOn = !soundOn; store.set("sound", soundOn ? "1" : "0"); setSoundBtn();
   if (soundOn) { beep(); try { if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission(); } catch(e){} }
 };
-let actx = null;
 function beep(){
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
@@ -285,7 +295,9 @@ function alertOnce(key, title, body){
 // ---- data
 let scanEtag = null, scanSource = "";
 async function loadScan(force){
-  if (document.hidden && !force) return;   // background tabs don't spend the shared rate limits
+  // Background tabs keep polling while alerts are on, so a NOW still chimes when you've switched
+  // to Public (VVV Nov 19 was missed with the tab hidden). Alerts off: hidden tabs stay quiet.
+  if (document.hidden && !force && !soundOn) return;
   let data = null, err = null, notModified = false;
   try {
     // Conditional request: a 304 (nothing new) doesn't count against GitHub's 60/hour limit.
@@ -309,6 +321,12 @@ async function loadScan(force){
   else { $("err").hidden = false; $("err").textContent = "Could not load scan data (" + err + "). Retrying."; }
 }
 function checkTransitions(prev, next){
+  // New NOW-quality signals (any time a name earns one, not just its first signal of the day).
+  const seen = new Set((prev?.signals_today || []).map(x => x.sym + "|" + x.ts));
+  (next.signals_today || []).forEach(x => {
+    if (!prev || seen.has(x.sym + "|" + x.ts) || !x.now_ok || x.past_window || !x.prime) return;
+    alertOnce(x.sym + "|sig|" + x.ts, `NOW ${x.sym} ${x.setup}`, `Entry ${fmt(x.entry)} · stop ${fmt(x.stop)} · target ${fmt(tgt(x.entry, x.tp_pct))}`);
+  });
   const before = {}; (prev?.survivors || []).forEach(r => before[r.sym] = r.setup);
   (next.survivors || []).forEach(r => {
     if (SIGNALS.includes(r.setup) && before[r.sym] !== r.setup && !r.late && loudEnough(r) && r.now_ok !== false)
