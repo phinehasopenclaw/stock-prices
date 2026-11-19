@@ -154,6 +154,7 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
   <div class="settings" id="settings" hidden>
     <label for="riskIn">Risk per trade ($)<input id="riskIn" type="number" min="25" step="25" value="200"></label>
     <label for="keyIn">Finnhub key (stays in this browser)<input id="keyIn" type="password" autocomplete="off" placeholder="paste key for live prices"></label>
+    <label for="capIn">Max $ per trade<input id="capIn" type="number" min="1000" step="1000" value="15000"></label>
     <label for="maxIn">Cards to show<input id="maxIn" type="number" min="1" max="20" value="8"></label>
   </div>
   <div class="err" id="err" hidden></div>
@@ -231,6 +232,15 @@ const addMin = (hhmm, m) => { const [h, mm] = hhmm.split(":").map(Number), t = h
 const inPlay = r => ctHM() >= 900 && (((r.rel_vol_day || 0) >= 1 && r.rel_vol_day < 5) || (ctHM() < 1200 && (r.rel_vol || 0) >= 2)) && (r.vol_surge || 0) >= 1 && r.setup !== "BREAK";
 const openTag = r => /^ORB/.test(r.setup || "") && ctHM() < 900 && r.risk_pct != null && r.risk_pct <= RISK_CAP;
 const loudEnough = r => r.setup === "IGNITION" ? (r.vol_pace || 0) >= 3 : (r.rel_vol || 0) >= ALERT_RV;
+// Size by risk, but (Nov 19 UTZ) never on a stop tighter than 0.4% and never more than the $ cap:
+// a 3-cent stop on a $14 stock asked for 6,666 sh = $95k.
+const MIN_STOP_PCT = 0.4;
+function sizeOf(entry, stop){
+  const risk = +store.get("risk", "200") || 200, cap = +store.get("cap", "15000") || 15000;
+  const R = Math.max(entry - stop, entry * MIN_STOP_PCT / 100);
+  const byRisk = Math.floor(risk / R), byCap = Math.floor(cap / entry);
+  return { sh: Math.max(0, Math.min(byRisk, byCap)), capped: byCap < byRisk, floored: entry - stop < entry * MIN_STOP_PCT / 100 };
+}
 const SIGNALS = ["IGNITION", "ORB-TRIGGER", "A-TRIGGER", "B-BREAKOUT", "V-TRIGGER"];
 const LOSS_HALF = -200, LOSS_STOP = -400, WIN_DONE = 1200;   // Rule 9 + half-size step
 const store = {
@@ -255,10 +265,11 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 $("riskIn").value = store.get("risk", "200");
 $("keyIn").value = store.get("key", "");
 $("maxIn").value = store.get("max", "8");
+$("capIn").value = store.get("cap", "15000");
 $("setBtn").onclick = () => { $("settings").hidden = !$("settings").hidden; };
 $("livePill").onclick = () => { if (!store.get("key", "")) { $("settings").hidden = false; $("keyIn").focus(); } };
-["riskIn","keyIn","maxIn"].forEach(id => $(id).addEventListener("change", () => {
-  store.set({riskIn:"risk",keyIn:"key",maxIn:"max"}[id], $(id).value.trim()); render(); pollLive();
+["riskIn","keyIn","maxIn","capIn"].forEach(id => $(id).addEventListener("change", () => {
+  store.set({riskIn:"risk",keyIn:"key",maxIn:"max",capIn:"cap"}[id], $(id).value.trim()); render(); pollLive();
 }));
 function setSoundBtn(){
   const armed = actx && actx.state === "running";
@@ -391,6 +402,7 @@ function verdict(r, price){
   if (!r.pass) return ["SKIP", (r.reject || []).join(", ") || "Fails a check"];
   if (["FADING","PM-FADE","THIN","NO DATA"].includes(r.setup)) return ["SKIP", r.setup_note || r.setup];
   if (dayState().block) return ["SKIP", "Done for the day (Rule 9)"];
+  if (r.pinned) return ["SKIP", "Buyout target pinned near the deal price: nothing to scalp"];
   if (scan.session === "PRE")
     return ["WAIT", r.setup === "PM-STRONG" ? `Open: green first 5-min candle, then its high; ${fmt(r.pm_high)} must clear` : "First 5-min candle at 8:35 CT"];
   if (scan.session !== "REGULAR") return ["SKIP", "Market closed"];
@@ -425,8 +437,8 @@ function card(r){
   const risk = +store.get("risk", "200") || 200;
   let size = "";
   if (r.entry && r.stop && r.entry > r.stop) {
-    const sh = Math.floor(risk / (r.entry - r.stop));
-    size = `<div class="size">Size at $${risk} risk: <b>${sh.toLocaleString()} sh</b> · $${Math.round(sh * r.entry).toLocaleString()} deployed</div>`;
+    const z = sizeOf(r.entry, r.stop), sh = z.sh;
+    size = `<div class="size">Size at $${risk} risk: <b>${sh.toLocaleString()} sh</b> · $${Math.round(sh * r.entry).toLocaleString()} deployed${z.capped ? ` <b style="color:var(--warn)">· capped at $${(+store.get("cap","15000")).toLocaleString()}</b>` : ""}${z.floored ? " · stop too tight, sized to a 0.4% stop" : ""}</div>`;
   }
   if (L && r.entry && price >= r.entry && ["A-WATCH","A-TRIGGER","B-BREAKOUT","B-WATCH","ORB-WATCH","ORB-TRIGGER","IGNITION"].includes(r.setup) && !r.late && loudEnough(r)
       && (price - r.entry) <= 0.3 * (r.entry - r.stop))
@@ -436,7 +448,7 @@ function card(r){
   const A = (scan.armed || []).find(a => a.sym === r.sym);
   let armed = "";
   if (A) {
-    const sh = Math.floor((+store.get("risk", "200") || 200) / (A.entry - A.stop));
+    const sh = sizeOf(A.entry, A.stop).sh;
     armed = `<div class="next go"><b>ARMED</b> · rest this now in Public: <b>BUY STOP-LIMIT ${sh.toLocaleString()} sh · stop ${fmt(A.entry)} · limit ${fmt(A.buy_limit)}</b>. Then the protective stop at ${fmt(A.stop)} the moment it fills. Cancel if the card leaves the armed list.</div>`;
   }
   // Don't chase: once price is well past the entry, the planned risk no longer holds.
@@ -551,7 +563,7 @@ function openIn(sym){
   const entry = r.entry || r.price, stop = r.stop || r2(entry * 0.97), R = entry - stop;
   openModal(`I'm in ${sym}`, [
     { k: "entry", label: "Fill price", v: fmt(entry, entry < 10 ? 3 : 2) },
-    { k: "shares", label: "Shares", v: R > 0 ? Math.floor(risk / R) : "" },
+    { k: "shares", label: "Shares", v: R > 0 ? sizeOf(entry, stop).sh : "" },
     { k: "stop", label: "Stop", v: fmt(stop) },
     { k: "t1", label: "Target 1 (half)", v: fmt(r.t1 || entry + 2 * R) },
     { k: "t2", label: "Target 2 (rest)", v: fmt(r.t2 || entry + 3 * R) },
@@ -616,8 +628,17 @@ function posCard(p){
   let orders, next, cls = "";
   const tp = r2(tgt(p.entry, p.tp_pct)), outAt = p.opened + HOLD_MIN * 60000, left = Math.round((outAt - Date.now()) / 60000);
   const scalp = `Plan: target <b>${fmt(tp)}</b> (+${fmt(p.tp_pct || TP_PCT,1)}%) · stop <b>${fmt(p.stop)}</b> · out by <b>${new Date(outAt).toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"2-digit",minute:"2-digit"})}</b> (${left > 0 ? left + " min left" : "time's up"})`;
-  if (!p.half && price >= tp) { alertOnce(p.sym + "|tp", `${p.sym} hit target ${fmt(tp)}`, "Sell all: plan target reached."); }
-  if (!p.half && left <= 0) { alertOnce(p.sym + "|sellby", `${p.sym} sell-by reached`, "20 minutes up. Sell all at the bid."); }
+  // Run or take (Nov 19 BRBR: sold +1.5% at the card target, it ran +6%). 5-day replay: holding only
+  // when the target prints AT the high of day ABOVE VWAP added ~+3.7 pts over 282 signals; it wins on
+  // trend days, gives a little back in chop. Lock +half the target, sell on a 5-min close under VWAP.
+  const hod = Math.max(L?.h || 0, row?.day_high || 0, price), vw = row?.vwap;
+  const runOk = !p.half && price >= tp && vw && price > vw && price >= hod * 0.998;
+  const lock = r2(Math.max(p.stop, p.entry * (1 + (p.tp_pct || TP_PCT) / 200), runOk || p.running ? trail : 0));
+  if (runOk && !p.running) { p.running = true; savePos(); }
+  if (!p.half && price >= tp) {
+    if (p.running) alertOnce(p.sym + "|run", `${p.sym} at target and running`, `High of day above VWAP. Raise the stop to ${fmt(lock)}; sell on a 5-min close under VWAP ${fmt(vw)}.`);
+    else alertOnce(p.sym + "|tp", `${p.sym} hit target ${fmt(tp)}`, "Sell all: plan target reached."); }
+  if (!p.half && left <= 0 && !p.running) { alertOnce(p.sym + "|sellby", `${p.sym} sell-by reached`, "20 minutes up. Sell all at the bid."); }
   if (!p.half) {
     const beNow = price >= plus1R && p.stop < p.entry;
     orders = [
@@ -630,8 +651,11 @@ function posCard(p){
       alertOnce(p.sym + "|t1", `${p.sym} hit T1 ${fmt(p.t1)}`, "Sell half, re-stop the rest at breakeven."); }
     else if (beNow) { next = `Up 1R. Replace the stop on all ${open} shares with ${fmt(p.entry)} (breakeven).`; cls = "go";
       alertOnce(p.sym + "|1r", `${p.sym} +1R at ${fmt(plus1R)}`, `Move the stop to breakeven ${fmt(p.entry)}.`); }
-    else if (price >= tp) { next = `Plan target ${fmt(tp)} reached. Sell all ${open} with a limit at the bid.`; cls = "go"; }
-    else if (left <= 0) { next = `${HOLD_MIN} minutes are up. Sell all ${open} now; the trade had its chance.`; cls = "warn"; }
+    else if (p.running && vw && price > vw && price > lock) { next = `RUNNER: at target, high of day, above VWAP. Raise the stop on all ${open} to <b>${fmt(lock)}</b> (locks +${fmt((lock / p.entry - 1) * 100, 1)}%). Sell on a 5-min close under VWAP ${fmt(vw)}. Clock no longer applies.`; cls = "go"; }
+    else if (p.running) { next = `Runner lost it (under VWAP ${fmt(vw)} or the ${fmt(lock)} lock). Sell all ${open} at the bid.`; cls = "warn";
+      alertOnce(p.sym + "|runend", `${p.sym}: runner done`, "Sell the rest at the bid."); }
+    else if (price >= tp) { next = `Plan target ${fmt(tp)} reached, but not at the high of day above VWAP. Sell all ${open} with a limit at the bid.`; cls = "go"; }
+    else if (left <= 0 && !p.running) { next = `${HOLD_MIN} minutes are up. Sell all ${open} now; the trade had its chance.`; cls = "warn"; }
     else next = `Hold. Target ${fmt(tp)} or stop ${fmt(p.stop)}, out in ${left} min either way.`;
   } else {
     orders = [

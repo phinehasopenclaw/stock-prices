@@ -913,6 +913,15 @@ def now_quality(r):
             why.append(f"stop {risk:.1f}% away (cap {RISK_CAP:g}%)")   # matches the page's SKIP (AS, IBRX Nov 18)
         if tp and risk and tp < 0.5 * risk:
             why.append(f"target +{tp:.1f}% vs {risk:.1f}% stop")
+        # Nov 19 UTZ: a 3-cent stop (0.21%) is inside the bid/ask noise, and sized by risk it
+        # asked for $95k. Under 0.4% the stop is not a real level.
+        if risk is not None and risk < 0.4:
+            why.append(f"stop {risk:.2f}% away: inside the noise")
+    # Buyout targets sit at the deal price (UTZ Nov 19: 14.28, range 0.1% all morning). Nothing to scalp.
+    p, hi, lo = r.get("price") or 0, r.get("day_high") or 0, r.get("day_low") or 0
+    r["pinned"] = bool(r.get("catalyst_type") == "M&A" and p and hi and lo and (hi - lo) / p < 0.008)
+    if r["pinned"]:
+        why.append("buyout target pinned at the deal price")
     r["now_ok"] = not why
     r["now_why"] = why
 

@@ -21,7 +21,7 @@ def enabled():
 
 
 def status():
-    return {"enabled": bool(_SECRET), "backoff_until": _fail["until"], "last_error": _fail["last"]}
+    return {"enabled": bool(_SECRET), "backoff_until": _fail["until"], "last_error": _fail["last"], **_qstat}
 
 
 def _err(msg):
@@ -58,13 +58,19 @@ def _account(tok):
     return _acct["id"]
 
 
-def quotes(symbols, max_age_s=30):
-    """{sym: {"p": last, "bid", "ask", "vol": day volume, "age": seconds}} for fresh quotes only.
+_qstat = {"nofill": 0, "stale": 0}
+
+
+def quotes(symbols, max_age_s=600):
+    """{sym: {"p": last, "bid", "ask", "vol": day volume, "age": seconds}}.
+    Nov 19: a 30 s cutoff dropped 23 of 52 thin names to Yahoo; their last trade is still the
+    current price, so keep it up to 10 min old and report the age.
     Returns {} on any failure; callers fall back to Yahoo."""
     syms = sorted({s for s in symbols if s})
     if not syms or not enabled():
         return {}
     out = {}
+    _qstat.update(nofill=0, stale=0)
     try:
         tok = _token()
         acct = _account(tok)
@@ -80,6 +86,7 @@ def quotes(symbols, max_age_s=30):
                 raise RuntimeError(f"quotes HTTP {r.status_code}")
             for q in r.json().get("quotes", []):
                 if q.get("outcome") != "SUCCESS" or q.get("last") in (None, ""):
+                    _qstat["nofill"] += 1
                     continue
                 age = None
                 ts = q.get("lastTimestamp")
@@ -89,6 +96,7 @@ def quotes(symbols, max_age_s=30):
                     except Exception:
                         age = None
                 if age is not None and age > max_age_s:
+                    _qstat["stale"] += 1
                     continue
                 f = lambda k: float(q[k]) if q.get(k) not in (None, "") else None
                 out[q["instrument"]["symbol"]] = {"p": f("last"), "bid": f("bid"), "ask": f("ask"),
