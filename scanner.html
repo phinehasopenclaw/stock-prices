@@ -182,6 +182,15 @@ button.primary{background:var(--accent);color:#04121f;border-color:var(--accent)
 <div class="copyrow" style="margin-top:8px"><code id="ledgerLines"></code><button type="button" id="copyLedger">Copy for ledger</button></div>
 </div>
 
+<div id="paperWrap" hidden>
+<h2>Paper bot <span class="n" id="paperN"></span></h2>
+<div class="m" style="font-size:12px;margin:-4px 0 8px" id="paperNote"></div>
+<div class="tbl"><table>
+  <thead><tr><th>Ticker</th><th>Signal</th><th>Shares</th><th>Fill</th><th>Exit</th><th>Why</th><th>P&amp;L</th></tr></thead>
+  <tbody id="paperRows"></tbody>
+</table></div>
+</div>
+
 <h2>Survivors <span class="n" id="survN"></span></h2>
 <div class="grid" id="cards"><div class="empty">Waiting for the first scan. The scanner runs every ~2 minutes from 5:15 to 16:15 CT on weekdays.</div></div>
 
@@ -494,6 +503,7 @@ function render(){
   renderScore();
   renderFresh();
   renderPnl();
+  renderPaper();
   $("survN").textContent = `· ${surv.length}`;
   $("rejN").textContent = `· ${rej.length}`;
   const extra = surv.slice(max);
@@ -766,6 +776,26 @@ function renderFresh(){
       <td>${fmt(x.entry)}</td><td>${fmt(x.stop)}</td><td>${fmt(tgt(x.entry, x.tp_pct))} · ${x.fill_time_ct ? addMin(x.fill_time_ct, HOLD_MIN) : "+" + HOLD_MIN + "m"}</td><td>${fmt(p, p < 10 ? 3 : 2)}</td>
       <td class="${rn == null ? "" : rn >= 0 ? "up" : "dn"}">${rn == null ? "—" : (rn >= 0 ? "+" : "") + fmt(rn, 1) + "R"} · ${best}</td></tr>`;
   }).join("");
+}
+// Paper bot (paperbot.py): simulated fills only, never an order. Nov 20 plan: ~4 weeks of paper first.
+function renderPaper(){
+  const P = scan.paper;
+  $("paperWrap").hidden = !P;
+  if (!P) return;
+  const hist = (P.history || []).slice(0, 10), tot = hist.reduce((a, h) => a + h.pnl, 0);
+  $("paperN").textContent = `· today ${fmtUSD(P.realized)} · ${P.wins}W/${P.losses}L${P.open.length ? ` · ${P.open.length} open` : ""}${P.done_for_day ? " · done for the day" : ""}`;
+  $("paperNote").textContent = `Paper only, no orders. Fills at the Public ask + 0.05%${P.entry_slip_bps_vs_model != null ? `; entries average ${P.entry_slip_bps_vs_model} bps vs the backtest model` : ""}.`
+    + (hist.length ? ` Last ${hist.length} days: ${fmtUSD(tot)} (${hist.map(h => fmtUSD(h.pnl)).join(", ")}).` : "");
+  const q = (scan.quotes || {});
+  const row = (x, open) => {
+    const last = open ? (q[x.sym] && (q[x.sym].p || q[x.sym].price)) : x.out;
+    const pnl = open ? (last ? (last - x.fill) * x.sh : 0) : x.pnl;
+    return `<tr><td><b>${esc(x.sym)}</b></td><td>${esc(x.t_sig)} ${esc(x.setup)}</td><td>${x.sh.toLocaleString()}</td><td>${(+x.fill).toFixed(2)}</td>
+      <td>${last ? (+last).toFixed(2) : "—"}</td><td>${open ? (x.run ? `running, lock ${(+x.lock).toFixed(2)}` : `open · stop ${(+x.stop).toFixed(2)} · tgt ${(+x.target).toFixed(2)}`) : x.why}</td>
+      <td style="color:var(${pnl >= 0 ? "--good" : "--bad"})">${fmtUSD(pnl)}</td></tr>`;
+  };
+  $("paperRows").innerHTML = P.open.map(x => row(x, true)).join("") + [...P.closed].reverse().map(x => row(x, false)).join("")
+    || `<tr><td colspan="7" class="m">No paper trades yet today. It takes NOW signals and strong-news armed breaks 08:30–10:30 CT.</td></tr>`;
 }
 function renderPositions(){
   const ps = Object.values(positions);

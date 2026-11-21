@@ -13,6 +13,7 @@ Runs as a long-lived GitHub Actions job. Each loop:
 import datetime as dt
 import json
 import publicdata as pubq   # real-time quotes (read-only); Yahoo stays the fallback
+import paperbot             # paper trading only: simulated fills, no orders
 import math
 import os
 import re
@@ -1761,6 +1762,35 @@ def debounce(rows):
             r[k] = shown[k]
 
 
+_paper = paperbot.PaperBot()
+
+
+def paper_step(signals_today):
+    """Run the paper bot one step on Public quotes + Yahoo 1-minute bars. Simulated fills only."""
+    now = dt.datetime.now(CT)
+    s = _paper.s if _paper.s.get("date") == now.date().isoformat() else {}
+    live = {p["sym"] for p in s.get("open", [])} | {q["sym"] for q in s.get("pending", [])}
+    fresh = {x["sym"] for x in signals_today if paperbot.takes(x) and x.get("id") not in set(s.get("seen", []))}
+    syms = sorted(live | fresh)
+    quotes = pubq.quotes(syms) if syms else {}
+    bars = {}
+    if live:
+        data = yf.download(sorted(live), period="1d", interval="1m", prepost=False, group_by="ticker",
+                           progress=False, threads=True, auto_adjust=False)
+        multi = getattr(data.columns, "nlevels", 1) > 1
+        for sym in live:
+            try:
+                df = (data[sym] if multi else data).dropna(subset=["Close"])
+                df.index = df.index.tz_convert(CT)
+                bars[sym] = df
+            except Exception:
+                pass
+    out = _paper.step(now, signals_today, quotes, bars)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    _paper.save(os.path.join(OUT_DIR, "paper.json"))
+    return out
+
+
 def one_loop():
     _state["loop"] += 1
     _state["errors"] = []
@@ -1832,8 +1862,15 @@ def one_loop():
             quotes = fetch_quotes(sorted({x["sym"] for x in signals_today}))
         except Exception as e:
             _state["errors"].append(f"quotes: {e!r}"[:150])
+    paper = None
+    if session == "REGULAR":
+        try:
+            paper = paper_step(signals_today)
+        except Exception as e:
+            _state["errors"].append(f"paper bot: {e!r}"[:150])
     now = dt.datetime.now(dt.timezone.utc)
     payload = {
+        "paper": paper,
         "flow_top": _state.get("flow_top", []),
         "flow_measured": _state.get("flow_measured", 0),
         "armed": armed_out,
@@ -1887,6 +1924,8 @@ def main():
     subprocess.run(["rm", "-rf", os.path.join(OUT_DIR, "archive")])   # start clean; today's files come back via restore
     archive_restore()
     archive_prune()
+    global _paper
+    _paper = paperbot.load(os.path.join(OUT_DIR, "paper.json"), REPO, TOKEN, requests)
     threading.Thread(target=watch_armed, daemon=True).start()
     end_today = dt.datetime.now(CT).replace(hour=END_CT_HHMM[0], minute=END_CT_HHMM[1],
                                             second=0, microsecond=0)
