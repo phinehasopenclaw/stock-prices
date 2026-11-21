@@ -403,6 +403,9 @@ function verdict(r, price){
   if (["FADING","PM-FADE","THIN","NO DATA"].includes(r.setup)) return ["SKIP", r.setup_note || r.setup];
   if (dayState().block) return ["SKIP", "Done for the day (Rule 9)"];
   if (r.pinned) return ["SKIP", "Buyout target pinned near the deal price: nothing to scalp"];
+  // One loss per name per day (Nov 13-20 replay: +$136 for you, +$165 for the bot; YSWY Nov 20, BXDC Nov 16).
+  { const lost = closedToday.find(c => c.sym === r.sym && c.pnl < 0);
+    if (lost) return ["SKIP", `Already lost ${fmtUSD(lost.pnl)} on ${r.sym} today: one loss per name`]; }
   if (scan.session === "PRE")
     return ["WAIT", r.setup === "PM-STRONG" ? `Open: green first 5-min candle, then its high; ${fmt(r.pm_high)} must clear` : "First 5-min candle at 8:35 CT"];
   if (scan.session !== "REGULAR") return ["SKIP", "Market closed"];
