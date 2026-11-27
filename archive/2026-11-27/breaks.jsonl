@@ -1,0 +1,10 @@
+{"t":"09:16:26","sym":"SNY","armed_from":"ORB-WATCH","entry":53.54,"stop":53.03,"price":53.55500030517578,"past_r":0.03,"bar_vol_x":2.16,"result":"BREAK"}
+{"t":"09:51:37","sym":"OMH","armed_from":"A-WATCH","entry":4.74,"stop":4.62,"price":4.7442,"past_r":0.03,"bar_vol_x":2.11,"result":"BREAK"}
+{"t":"09:53:03","sym":"ING","armed_from":"B-WATCH","entry":29.99,"stop":29.75,"price":29.99,"past_r":0.0,"bar_vol_x":6.66,"result":"BREAK"}
+{"t":"10:01:27","sym":"HPQ","armed_from":"B-WATCH","entry":32.37,"stop":31.84,"price":32.37,"past_r":0.0,"bar_vol_x":1.55,"result":"BREAK"}
+{"t":"10:26:18","sym":"NTSK","armed_from":"B-WATCH","entry":28.07,"stop":27.67,"price":28.075,"past_r":0.01,"bar_vol_x":1.16,"result":"BREAK"}
+{"t":"10:52:29","sym":"NTSK","armed_from":"B-WATCH","entry":28.44,"stop":28.02,"price":28.44,"past_r":0.0,"bar_vol_x":2.14,"result":"BREAK"}
+{"t":"11:08:52","sym":"NTSK","armed_from":"B-WATCH","entry":28.48,"stop":28.09,"price":28.49,"past_r":0.03,"bar_vol_x":1.56,"result":"BREAK"}
+{"t":"11:23:56","sym":"NTSK","armed_from":"B-WATCH","entry":28.79,"stop":28.08,"price":28.815,"past_r":0.04,"bar_vol_x":1.18,"result":"BREAK"}
+{"t":"11:47:40","sym":"SLSN","armed_from":"A-WATCH","entry":2.71,"stop":2.66,"price":2.74,"past_r":0.6,"bar_vol_x":0.85,"result":"already past chase limit"}
+{"t":"11:49:40","sym":"IQMX","armed_from":"A-WATCH","entry":7.62,"stop":7.53,"price":7.745,"past_r":1.39,"bar_vol_x":1.47,"result":"already past chase limit"}
